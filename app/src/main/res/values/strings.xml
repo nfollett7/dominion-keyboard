@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Voice Command Keyboard</string>
+    <string name="ime_name">VCK — Voice Command Keyboard</string>
+    <string name="history_title">Input History</string>
+    <string name="settings_title">Keyboard Settings</string>
+    <string name="subtype_en_US">English (US)</string>
+    <string name="subtype_es">Español</string>
+
+    <!-- Setup Screen -->
+    <string name="setup_title">Voice Command Keyboard</string>
+    <string name="setup_subtitle">Your AI-powered GBoard replacement</string>
+    <string name="step1_title">Step 1: Enable Keyboard</string>
+    <string name="step1_desc">Go to Settings → System → Languages &amp; Input → On-screen keyboard → Manage keyboards, then enable Voice Command Keyboard.</string>
+    <string name="step1_btn">Open Input Method Settings</string>
+    <string name="step2_title">Step 2: Set as Default</string>
+    <string name="step2_desc">Tap the keyboard icon in any text field, then select Voice Command Keyboard as your default input method.</string>
+    <string name="step2_btn">Set as Default Keyboard</string>
+    <string name="step3_title">Step 3: Enter Your OpenAI API Key</string>
+    <string name="step3_desc">Required for voice dictation (Whisper) and Spanish translation (GPT-4).</string>
+    <string name="api_key_hint">sk-...</string>
+    <string name="save_api_key">Save API Key</string>
+    <string name="api_key_saved">API Key saved successfully!</string>
+    <string name="view_history">View Input History</string>
+    <string name="open_settings">Settings</string>
+
+    <!-- Keyboard Labels -->
+    <string name="key_space">SPACE</string>
+    <string name="key_return">RETURN</string>
+    <string name="key_delete">⌫</string>
+    <string name="key_mic">🎤</string>
+    <string name="key_translate">ES</string>
+    <string name="key_shift">⇧</string>
+    <string name="key_numbers">123</string>
+    <string name="key_letters">ABC</string>
+    <string name="key_symbols">!@#</string>
+
+    <!-- History Screen -->
+    <string name="history_empty">No keyboard inputs logged yet.\nStart typing to see your history here.</string>
+    <string name="history_search_hint">Search inputs…</string>
+    <string name="history_clear_all">Clear All</string>
+    <string name="history_export">Export CSV</string>
+    <string name="history_confirm_clear">Clear all keyboard history?</string>
+    <string name="confirm">Confirm</string>
+    <string name="cancel">Cancel</string>
+
+    <!-- Notifications / Toasts -->
+    <string name="recording_start">Listening… speak now</string>
+    <string name="recording_stop">Processing speech…</string>
+    <string name="translating">Translating to Spanish…</string>
+    <string name="error_no_api_key">No API key set. Please open the app and enter your OpenAI key.</string>
+    <string name="error_network">Network error. Check your connection.</string>
+    <string name="error_mic_permission">Microphone permission required for voice dictation.</string>
+</resources>

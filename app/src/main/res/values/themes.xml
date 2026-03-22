@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <style name="Theme.VoiceCommandKeyboard" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <!-- Primary Brand Color -->
+        <item name="colorPrimary">@color/primary</item>
+        <item name="colorPrimaryDark">@color/primary_dark</item>
+        <item name="colorPrimaryVariant">@color/primary_variant</item>
+        <item name="colorOnPrimary">@color/text_on_primary</item>
+        <!-- Secondary Brand Color -->
+        <item name="colorSecondary">@color/accent</item>
+        <item name="colorSecondaryVariant">@color/accent_light</item>
+        <item name="colorOnSecondary">@color/white</item>
+        <!-- Background -->
+        <item name="android:colorBackground">@color/bg_primary</item>
+        <item name="colorSurface">@color/bg_surface</item>
+        <item name="colorOnSurface">@color/text_primary</item>
+        <!-- Status Bar -->
+        <item name="android:statusBarColor">@color/bg_primary</item>
+        <item name="android:navigationBarColor">@color/bg_primary</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <!-- Text -->
+        <item name="android:textColorPrimary">@color/text_primary</item>
+        <item name="android:textColorSecondary">@color/text_secondary</item>
+        <item name="android:textColorHint">@color/text_hint</item>
+        <!-- Window -->
+        <item name="android:windowBackground">@color/bg_primary</item>
+    </style>
+
+    <!-- Keyboard key styles -->
+    <style name="KeyButton">
+        <item name="android:layout_height">match_parent</item>
+        <item name="android:layout_margin">2dp</item>
+        <item name="android:textSize">16sp</item>
+        <item name="android:textColor">@color/key_text</item>
+        <item name="android:background">@drawable/key_bg_normal</item>
+        <item name="android:gravity">center</item>
+        <item name="android:includeFontPadding">false</item>
+        <item name="android:stateListAnimator">@null</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+    </style>
+
+    <style name="KeyButton.Action" parent="KeyButton">
+        <item name="android:textColor">@color/key_action_text</item>
+        <item name="android:background">@drawable/key_bg_action</item>
+        <item name="android:textSize">13sp</item>
+    </style>
+
+    <style name="KeyButton.Special" parent="KeyButton">
+        <item name="android:background">@drawable/key_bg_special</item>
+        <item name="android:textSize">13sp</item>
+    </style>
+
+    <!-- Suggestion chip style -->
+    <style name="SuggestionChip">
+        <item name="android:layout_height">36dp</item>
+        <item name="android:paddingStart">12dp</item>
+        <item name="android:paddingEnd">12dp</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:textColor">@color/suggestion_text</item>
+        <item name="android:background">@drawable/suggestion_chip_bg</item>
+        <item name="android:gravity">center</item>
+    </style>
+
+</resources>

@@ -1,0 +1,8 @@
+# Copy this file to local.properties and fill in your values
+# DO NOT commit local.properties to version control
+
+# Android SDK path (update to match your machine)
+sdk.dir=/Users/YOUR_USERNAME/Library/Android/sdk
+
+# OpenAI API Key (optional — can also be entered in the app UI)
+OPENAI_API_KEY=sk-your-openai-api-key-here
