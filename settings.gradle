@@ -13,5 +13,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "VoiceCommandKeyboard"
+rootProject.name = "DominionKeyboard"
 include ':app'
