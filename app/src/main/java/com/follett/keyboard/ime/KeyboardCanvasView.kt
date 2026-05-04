@@ -331,12 +331,13 @@ class KeyboardCanvasView @JvmOverloads constructor(
             }
             keys.add(Key("⌫", "DELETE", 2, 8.5f, 1.5f, KeyStyle.ACTION))
 
-            // Row 3: 123 | MIC | SPACE | ES | ENTER
-            keys.add(Key("123", "NUMBERS", 3, 0f, 1.5f, KeyStyle.SPECIAL))
-            keys.add(Key("🎤", "MIC", 3, 1.5f, 1f, KeyStyle.MIC))
-            keys.add(Key("SPACE", "SPACE", 3, 2.5f, 4f))
-            keys.add(Key("ES", "TRANSLATE", 3, 6.5f, 1f, KeyStyle.SPECIAL))
-            keys.add(Key("↵", "ENTER", 3, 7.5f, 2.5f, KeyStyle.ACTION))
+            // Row 3: GBoard-style — ?123 | , | 🎤 | SPACE | . | ↵
+            keys.add(Key("?123", "NUMBERS", 3, 0f, 1.5f, KeyStyle.SPECIAL))
+            keys.add(Key(",", ",", 3, 1.5f, 1f))
+            keys.add(Key("🎤", "MIC", 3, 2.5f, 1f, KeyStyle.MIC))
+            keys.add(Key("", "SPACE", 3, 3.5f, 4f))  // GBoard shows no label on space
+            keys.add(Key(".", ".", 3, 7.5f, 1f))
+            keys.add(Key("↵", "ENTER", 3, 8.5f, 1.5f, KeyStyle.ACTION))
 
             return KeyboardLayout(keys, 4, 10f)
         }

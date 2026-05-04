@@ -267,6 +267,8 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
             "SYMBOLS2" -> { /* Future */ }
             "MIC" -> handleMicToggle()
             "TRANSLATE" -> handleTranslate()
+            "," -> handlePunctuation(",")
+            "." -> handlePunctuation(".")
             else -> handleCharacter(key.tag)
         }
     }
@@ -305,6 +307,20 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
         val ic = currentInputConnection ?: return
         ic.commitText(" ", 1)
         queueLog(" ", "space")
+        val word = currentWordBuffer.toString().trim()
+        if (word.isNotEmpty()) {
+            queueLog(word, "word_complete")
+            predictiveEngine?.learnWord(word)
+        }
+        currentWordBuffer.clear()
+        updateSuggestionsDebounced("")
+    }
+
+    private fun handlePunctuation(char: String) {
+        val ic = currentInputConnection ?: return
+        ic.commitText(char, 1)
+        queueLog(char, "character")
+        // Punctuation ends a word
         val word = currentWordBuffer.toString().trim()
         if (word.isNotEmpty()) {
             queueLog(word, "word_complete")
@@ -445,12 +461,23 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
     // ═════════════════════════════════════════════════════════════════════════
 
     private fun handleMicToggle() {
-        if (isRecording) stopRecordingAndTranscribe() else startRecording()
+        if (isRecording) {
+            stopRecordingAndTranscribe()
+        } else {
+            startRecording()
+        }
     }
 
     private fun startRecording() {
         val apiKey = prefsManager.getApiKey()
-        if (apiKey.isNullOrBlank()) { showToast(getString(R.string.error_no_api_key)); return }
+        if (apiKey.isNullOrBlank()) {
+            showToast("Set API key in Dominion Keyboard app first")
+            return
+        }
+        if (openAIClient == null) {
+            showToast("AI initializing, try again in a moment")
+            return
+        }
 
         audioFile = File(cacheDir, AUDIO_FILE_NAME)
         try {
@@ -518,7 +545,14 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
 
     private fun handleTranslate() {
         val apiKey = prefsManager.getApiKey()
-        if (apiKey.isNullOrBlank()) { showToast(getString(R.string.error_no_api_key)); return }
+        if (apiKey.isNullOrBlank()) {
+            showToast("Set API key in Dominion Keyboard app first")
+            return
+        }
+        if (openAIClient == null) {
+            showToast("AI initializing, try again in a moment")
+            return
+        }
 
         val ic = currentInputConnection ?: return
         val text = ic.getTextBeforeCursor(500, 0)?.toString() ?: ""
