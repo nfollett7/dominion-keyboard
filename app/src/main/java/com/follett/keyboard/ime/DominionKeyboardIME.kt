@@ -8,10 +8,12 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.util.Log
-import android.view.HapticFeedbackConstants
+import android.view.LayoutInflater
 import android.view.View
+import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.widget.Button
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import com.follett.keyboard.R
@@ -23,7 +25,6 @@ import com.follett.keyboard.utils.PredictiveTextEngine
 import com.follett.keyboard.utils.PrefsManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -31,7 +32,7 @@ import java.io.File
 import java.time.Instant
 
 /**
- * VoiceKeyboardIME — The core Input Method Service.
+ * DominionKeyboardIME — The core Input Method Service.
  *
  * This service replaces GBoard and provides:
  *  - Full QWERTY keyboard with shift, numbers, symbols
@@ -40,16 +41,16 @@ import java.time.Instant
  *  - Spanish translation via GPT-4
  *  - Complete keystroke logging to Room database
  */
-class VoiceKeyboardIME : InputMethodService() {
+class DominionKeyboardIME : InputMethodService() {
 
     companion object {
-        private const val TAG = "VoiceKeyboardIME"
-        private const val AUDIO_FILE_NAME = "vck_recording.m4a"
+        private const val TAG = "DominionKeyboardIME"
+        private const val AUDIO_FILE_NAME = "dominion_recording.m4a"
     }
 
     // ─── Views ───────────────────────────────────────────────────────────────
-    private lateinit var keyboardView: View
-    private lateinit var numbersView: View
+    private var keyboardView: View? = null
+    private var numbersView: View? = null
     private var currentView: KeyboardMode = KeyboardMode.LETTERS
 
     // ─── State ───────────────────────────────────────────────────────────────
@@ -96,17 +97,31 @@ class VoiceKeyboardIME : InputMethodService() {
         openAIClient = OpenAIClient(applicationContext)
         predictiveEngine = PredictiveTextEngine(applicationContext)
         prefsManager = PrefsManager(applicationContext)
-        Log.d(TAG, "VoiceKeyboardIME created")
+        Log.d(TAG, "DominionKeyboardIME created")
     }
 
     override fun onCreateInputView(): View {
-        keyboardView = layoutInflater.inflate(R.layout.keyboard_view, null)
-        numbersView = layoutInflater.inflate(R.layout.keyboard_numbers, null)
+        // Inflate with a FrameLayout parent for proper LayoutParams measurement.
+        // Passing null as parent causes the root view's layout_width/height to be
+        // ignored, which can result in a zero-height keyboard on some devices.
+        val inflater = LayoutInflater.from(this)
 
-        setupLetterKeyboard(keyboardView)
-        setupNumberKeyboard(numbersView)
+        keyboardView = inflater.inflate(R.layout.keyboard_view, null)
+        numbersView = inflater.inflate(R.layout.keyboard_numbers, null)
 
-        return keyboardView
+        // Explicitly set layout params to ensure the keyboard has proper dimensions
+        // when the IME framework measures and lays out the view.
+        val params = ViewGroup.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        )
+        keyboardView!!.layoutParams = params
+        numbersView!!.layoutParams = params
+
+        setupLetterKeyboard(keyboardView!!)
+        setupNumberKeyboard(numbersView!!)
+
+        return keyboardView!!
     }
 
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
@@ -170,7 +185,7 @@ class VoiceKeyboardIME : InputMethodService() {
      * whose tag is set to a key value.
      */
     private fun attachKeyListeners(root: View) {
-        if (root is android.view.ViewGroup) {
+        if (root is ViewGroup) {
             for (i in 0 until root.childCount) {
                 attachKeyListeners(root.getChildAt(i))
             }
@@ -287,7 +302,6 @@ class VoiceKeyboardIME : InputMethodService() {
     private fun handleShift() {
         val now = System.currentTimeMillis()
         if (now - lastShiftTapTime < 400) {
-            // Double-tap = caps lock
             toggleCapsLock()
         } else {
             isShifted = !isShifted
@@ -308,6 +322,7 @@ class VoiceKeyboardIME : InputMethodService() {
 
     private fun updateShiftState() {
         val view = if (currentView == KeyboardMode.LETTERS) keyboardView else return
+        if (view == null) return
         updateKeyLabels(view)
         // Update shift button appearance
         val shiftBtn = view.findViewWithTag<Button>("SHIFT")
@@ -320,7 +335,7 @@ class VoiceKeyboardIME : InputMethodService() {
     }
 
     private fun updateKeyLabels(root: View) {
-        if (root is android.view.ViewGroup) {
+        if (root is ViewGroup) {
             for (i in 0 until root.childCount) {
                 updateKeyLabels(root.getChildAt(i))
             }
@@ -345,12 +360,12 @@ class VoiceKeyboardIME : InputMethodService() {
 
     private fun switchToNumbers() {
         currentView = KeyboardMode.NUMBERS
-        setInputView(numbersView)
+        setInputView(numbersView!!)
     }
 
     private fun switchToLetters() {
         currentView = KeyboardMode.LETTERS
-        setInputView(keyboardView)
+        setInputView(keyboardView!!)
     }
 
     // ═════════════════════════════════════════════════════════════════════════

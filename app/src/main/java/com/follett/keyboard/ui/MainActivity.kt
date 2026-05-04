@@ -19,8 +19,8 @@ import kotlinx.coroutines.launch
  * MainActivity — App home screen and setup wizard.
  *
  * Guides the user through:
- *  1. Enabling VCK as an input method
- *  2. Setting VCK as the default keyboard
+ *  1. Enabling Dominion Keyboard as an input method
+ *  2. Setting Dominion Keyboard as the default keyboard
  *  3. Entering their OpenAI API key
  *
  * Also shows live usage statistics and navigation to history.

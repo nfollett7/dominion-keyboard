@@ -20,7 +20,7 @@ class PredictiveTextEngine(private val context: Context) {
 
     companion object {
         private const val TAG = "PredictiveTextEngine"
-        private const val PREFS_NAME = "vck_word_freq"
+        private const val PREFS_NAME = "dominion_word_freq"
         private const val MAX_LEARNED_WORDS = 10_000
         private const val USER_WEIGHT_MULTIPLIER = 3 // User's words rank higher
     }

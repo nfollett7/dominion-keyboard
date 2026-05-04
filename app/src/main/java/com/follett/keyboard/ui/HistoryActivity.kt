@@ -131,7 +131,7 @@ class HistoryActivity : AppCompatActivity() {
 
     private fun exportToCsv(logs: List<KeystrokeLog>) {
         try {
-            val file = File(cacheDir, "vck_history_export.csv")
+            val file = File(cacheDir, "dominion_history_export.csv")
             val writer = FileWriter(file)
 
             // CSV header
@@ -154,7 +154,7 @@ class HistoryActivity : AppCompatActivity() {
             val shareIntent = Intent(Intent.ACTION_SEND).apply {
                 type = "text/csv"
                 putExtra(Intent.EXTRA_STREAM, uri)
-                putExtra(Intent.EXTRA_SUBJECT, "VCK Keyboard History Export")
+                putExtra(Intent.EXTRA_SUBJECT, "Dominion Keyboard History Export")
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
 

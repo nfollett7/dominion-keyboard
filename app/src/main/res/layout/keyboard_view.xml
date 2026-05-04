@@ -66,8 +66,7 @@
     <TextView
         android:id="@+id/status_bar"
         android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="0"
+        android:layout_height="wrap_content"
         android:background="#1A7B2FFF"
         android:gravity="center"
         android:padding="3dp"

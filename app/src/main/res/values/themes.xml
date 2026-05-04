@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <style name="Theme.VoiceCommandKeyboard" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+    <style name="Theme.DominionKeyboard" parent="Theme.MaterialComponents.DayNight.NoActionBar">
         <!-- Primary Brand Color -->
         <item name="colorPrimary">@color/primary</item>
         <item name="colorPrimaryDark">@color/primary_dark</item>

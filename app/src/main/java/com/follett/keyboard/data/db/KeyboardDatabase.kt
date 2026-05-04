@@ -30,7 +30,7 @@ abstract class KeyboardDatabase : RoomDatabase() {
     abstract fun keystrokeLogDao(): KeystrokeLogDao
 
     companion object {
-        private const val DATABASE_NAME = "voice_command_keyboard.db"
+        private const val DATABASE_NAME = "dominion_keyboard.db"
 
         @Volatile
         private var INSTANCE: KeyboardDatabase? = null

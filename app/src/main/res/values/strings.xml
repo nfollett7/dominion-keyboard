@@ -1,20 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Voice Command Keyboard</string>
-    <string name="ime_name">VCK — Voice Command Keyboard</string>
+    <string name="app_name">Dominion Keyboard</string>
+    <string name="ime_name">Dominion Keyboard</string>
     <string name="history_title">Input History</string>
     <string name="settings_title">Keyboard Settings</string>
     <string name="subtype_en_US">English (US)</string>
     <string name="subtype_es">Español</string>
 
     <!-- Setup Screen -->
-    <string name="setup_title">Voice Command Keyboard</string>
-    <string name="setup_subtitle">Your AI-powered GBoard replacement</string>
+    <string name="setup_title">Dominion Keyboard</string>
+    <string name="setup_subtitle">Your AI-powered keyboard replacement</string>
     <string name="step1_title">Step 1: Enable Keyboard</string>
-    <string name="step1_desc">Go to Settings → System → Languages &amp; Input → On-screen keyboard → Manage keyboards, then enable Voice Command Keyboard.</string>
+    <string name="step1_desc">Go to Settings → System → Languages &amp; Input → On-screen keyboard → Manage keyboards, then enable Dominion Keyboard.</string>
     <string name="step1_btn">Open Input Method Settings</string>
     <string name="step2_title">Step 2: Set as Default</string>
-    <string name="step2_desc">Tap the keyboard icon in any text field, then select Voice Command Keyboard as your default input method.</string>
+    <string name="step2_desc">Tap the keyboard icon in any text field, then select Dominion Keyboard as your default input method.</string>
     <string name="step2_btn">Set as Default Keyboard</string>
     <string name="step3_title">Step 3: Enter Your OpenAI API Key</string>
     <string name="step3_desc">Required for voice dictation (Whisper) and Spanish translation (GPT-4).</string>

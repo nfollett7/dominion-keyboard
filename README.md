@@ -1,4 +1,4 @@
-# Voice Command Keyboard (VCK)
+# Dominion Keyboard
 
 > **A native Android IME that replaces GBoard** — featuring OpenAI Whisper voice dictation, predictive text, Spanish translation, and complete keystroke logging.
 
@@ -10,11 +10,11 @@
 |---|---|
 | **Full QWERTY Keyboard** | Complete IME with shift, caps lock, numbers, symbols, backspace, enter |
 | **Predictive Text** | Offline n-gram engine with 500+ built-in words + learns your personal vocabulary |
-| **🎤 Voice Dictation** | Tap mic → speak → OpenAI Whisper transcribes and inserts text |
-| **🌐 Spanish Translation** | Tap `ES` → GPT-4o-mini translates current text to Spanish in-place |
-| **📊 Input Logging** | Every keystroke, word, dictation, and translation logged to local SQLite DB |
-| **📋 History Dashboard** | Browse, search, and export your full typing history as CSV |
-| **⚙️ Settings** | Toggle haptic, sound, auto-capitalize, smart compose, logging on/off |
+| **Voice Dictation** | Tap mic → speak → OpenAI Whisper transcribes and inserts text |
+| **Spanish Translation** | Tap `ES` → GPT-4o-mini translates current text to Spanish in-place |
+| **Input Logging** | Every keystroke, word, dictation, and translation logged to local SQLite DB |
+| **History Dashboard** | Browse, search, and export your full typing history as CSV |
+| **Settings** | Toggle haptic, sound, auto-capitalize, smart compose, logging on/off |
 | **Futuristic Dark UI** | Deep space dark theme with cyan/purple accent colors |
 
 ---
@@ -24,7 +24,7 @@
 ```
 app/
 ├── ime/
-│   └── VoiceKeyboardIME.kt       ← Core InputMethodService (the keyboard itself)
+│   └── DominionKeyboardIME.kt    ← Core InputMethodService (the keyboard itself)
 ├── api/
 │   └── OpenAIClient.kt           ← Whisper + GPT-4 API calls
 ├── data/
@@ -62,11 +62,11 @@ app/
 ### Step 1 — Clone & Open
 
 ```bash
-git clone https://github.com/nfollett7/voice-command-center.git
-cd voice-command-center
+git clone https://github.com/nfollett7/dominion-keyboard.git
+cd dominion-keyboard
 ```
 
-Open the `voice-command-keyboard/` folder in Android Studio as a project.
+Open the project in Android Studio.
 
 ### Step 2 — Configure API Key (Optional at Build Time)
 
@@ -116,16 +116,16 @@ Copy the APK to your phone and open it. You may need to enable "Install from unk
 ### 1. Enable the Keyboard
 ```
 Settings → System → Languages & Input → On-screen keyboard → Manage keyboards
-→ Toggle ON "VCK — Voice Command Keyboard"
+→ Toggle ON "Dominion Keyboard"
 ```
 
 ### 2. Set as Default
-Open any app with a text field → tap the keyboard icon in the navigation bar → select **VCK — Voice Command Keyboard**.
+Open any app with a text field → tap the keyboard icon in the navigation bar → select **Dominion Keyboard**.
 
-Or tap **"Set as Default Keyboard"** in the VCK app.
+Or tap **"Set as Default Keyboard"** in the Dominion Keyboard app.
 
 ### 3. Enter Your OpenAI API Key
-Open the VCK app → enter your `sk-...` key in Step 3 → tap **Save API Key**.
+Open the Dominion Keyboard app → enter your `sk-...` key in Step 3 → tap **Save API Key**.
 
 Get a key at: [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
 
@@ -135,22 +135,22 @@ Get a key at: [platform.openai.com/api-keys](https://platform.openai.com/api-key
 
 ### Regular Typing
 - Tap any letter key to type
-- **⇧ Shift** — capitalize next letter
-- **Double-tap ⇧** — Caps Lock (⇪)
-- **⌫ Delete** — backspace one character
-- **Long-press ⌫** — clear all text
+- **Shift** — capitalize next letter
+- **Double-tap Shift** — Caps Lock
+- **Delete** — backspace one character
+- **Long-press Delete** — clear all text
 - **123** — switch to numbers/symbols
 - **ABC** — switch back to letters
 
 ### Prediction Bar
 The top bar shows 3 word suggestions. Tap any suggestion to complete the current word and add a space.
 
-### 🎤 Voice Dictation
-1. Tap the **🎤** mic button
+### Voice Dictation
+1. Tap the mic button
 2. Speak naturally
-3. Tap **⏹** to stop — Whisper transcribes and inserts the text
+3. Tap stop to stop — Whisper transcribes and inserts the text
 
-### 🌐 Spanish Translation
+### Spanish Translation
 1. Type your English text
 2. Tap the **ES** button
 3. The text before the cursor is replaced with its Spanish translation
@@ -160,7 +160,7 @@ The top bar shows 3 word suggestions. Tap any suggestion to complete the current
 ## Privacy & Data
 
 - **All keystroke data is stored locally on your device only** — nothing is sent to any server except OpenAI API calls (Whisper audio + translation text).
-- OpenAI API calls are only made when you tap 🎤 or ES.
+- OpenAI API calls are only made when you tap the mic or ES buttons.
 - You can disable logging entirely in Settings → Keystroke Logging.
 - You can clear all history from the History screen.
 
@@ -204,4 +204,4 @@ The top bar shows 3 word suggestions. Tap any suggestion to complete the current
 
 ---
 
-*Built by Manus AI for Nick Follett — Voice Command Center Project*
+*Built for Nick Follett — Dominion Keyboard Project*

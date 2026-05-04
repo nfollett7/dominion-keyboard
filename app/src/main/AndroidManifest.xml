@@ -14,7 +14,7 @@
         android:label="@string/app_name"
         android:roundIcon="@drawable/ic_keyboard"
         android:supportsRtl="true"
-        android:theme="@style/Theme.VoiceCommandKeyboard"
+        android:theme="@style/Theme.DominionKeyboard"
         tools:targetApi="31">
 
         <!-- ═══════════════════════════════════════════════════
@@ -22,7 +22,7 @@
              that Android registers as an Input Method
              ═══════════════════════════════════════════════════ -->
         <service
-            android:name=".ime.VoiceKeyboardIME"
+            android:name=".ime.DominionKeyboardIME"
             android:exported="true"
             android:label="@string/ime_name"
             android:permission="android.permission.BIND_INPUT_METHOD">
@@ -41,7 +41,7 @@
             android:name=".ui.MainActivity"
             android:exported="true"
             android:label="@string/app_name"
-            android:theme="@style/Theme.VoiceCommandKeyboard">
+            android:theme="@style/Theme.DominionKeyboard">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -54,7 +54,7 @@
             android:exported="false"
             android:label="@string/history_title"
             android:parentActivityName=".ui.MainActivity"
-            android:theme="@style/Theme.VoiceCommandKeyboard" />
+            android:theme="@style/Theme.DominionKeyboard" />
 
         <!-- Settings Activity -->
         <activity
@@ -62,7 +62,7 @@
             android:exported="false"
             android:label="@string/settings_title"
             android:parentActivityName=".ui.MainActivity"
-            android:theme="@style/Theme.VoiceCommandKeyboard" />
+            android:theme="@style/Theme.DominionKeyboard" />
 
         <!-- FileProvider for CSV export sharing -->
         <provider

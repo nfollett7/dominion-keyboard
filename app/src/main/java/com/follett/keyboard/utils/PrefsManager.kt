@@ -13,7 +13,7 @@ import androidx.core.content.edit
 class PrefsManager(context: Context) {
 
     companion object {
-        private const val PREFS_NAME = "vck_settings"
+        private const val PREFS_NAME = "dominion_keyboard_settings"
 
         // Keys
         const val KEY_OPENAI_API_KEY = "openai_api_key"
