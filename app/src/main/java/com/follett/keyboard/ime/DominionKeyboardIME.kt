@@ -4,18 +4,14 @@ import android.content.Context
 import android.inputmethodservice.InputMethodService
 import android.media.MediaRecorder
 import android.os.Build
-import android.os.Handler
-import android.os.Looper
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.util.Log
-import android.view.HapticFeedbackConstants
-import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
-import android.widget.Button
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import com.follett.keyboard.R
@@ -37,16 +33,14 @@ import java.time.Instant
 import java.util.concurrent.ConcurrentLinkedQueue
 
 /**
- * DominionKeyboardIME — The core Input Method Service.
+ * DominionKeyboardIME — High-performance Input Method Service.
  *
- * Performance-optimized for GBoard-level responsiveness:
- *  - Deferred background initialization of heavy dependencies
- *  - Batched keystroke logging (writes every 2 seconds, not per-character)
- *  - Debounced suggestion updates (50ms after last keystroke)
- *  - Cached system services (Vibrator)
- *  - Haptic feedback via View.performHapticFeedback (hardware-optimized)
+ * Architecture: Custom Canvas-based rendering (zero view hierarchy).
+ * This is the same approach used by GBoard and all production keyboards.
+ * A single KeyboardCanvasView draws all keys on a hardware-accelerated
+ * Canvas and handles raw touch events with zero propagation delay.
  */
-class DominionKeyboardIME : InputMethodService() {
+class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener {
 
     companion object {
         private const val TAG = "DominionKeyboardIME"
@@ -56,9 +50,15 @@ class DominionKeyboardIME : InputMethodService() {
     }
 
     // ─── Views ───────────────────────────────────────────────────────────────
-    private var keyboardView: View? = null
-    private var numbersView: View? = null
-    private var currentView: KeyboardMode = KeyboardMode.LETTERS
+    private var rootView: LinearLayout? = null
+    private var keyboardCanvas: KeyboardCanvasView? = null
+    private var currentMode: KeyboardMode = KeyboardMode.LETTERS
+
+    // ─── Suggestion bar ──────────────────────────────────────────────────────
+    private var suggestion1: TextView? = null
+    private var suggestion2: TextView? = null
+    private var suggestion3: TextView? = null
+    private var statusBar: TextView? = null
 
     // ─── State ───────────────────────────────────────────────────────────────
     private var isShifted = false
@@ -73,33 +73,19 @@ class DominionKeyboardIME : InputMethodService() {
     private val serviceScope = CoroutineScope(Dispatchers.Main + serviceJob)
     private var suggestionJob: Job? = null
 
-    // ─── Dependencies (lazy/deferred init for fast startup) ──────────────────
+    // ─── Dependencies (deferred init) ────────────────────────────────────────
     private var db: KeyboardDatabase? = null
     private var openAIClient: OpenAIClient? = null
     private var predictiveEngine: PredictiveTextEngine? = null
     private lateinit var prefsManager: PrefsManager
 
-    // ─── Audio Recording ─────────────────────────────────────────────────────
+    // ─── Audio ───────────────────────────────────────────────────────────────
     private var mediaRecorder: MediaRecorder? = null
     private var audioFile: File? = null
-
-    // ─── Suggestion TextViews ─────────────────────────────────────────────────
-    private var suggestion1: TextView? = null
-    private var suggestion2: TextView? = null
-    private var suggestion3: TextView? = null
-    private var statusBar: TextView? = null
-
-    // ─── Mic key reference ───────────────────────────────────────────────────
-    private var micButton: Button? = null
-
-    // ─── Cached Vibrator ─────────────────────────────────────────────────────
-    private var vibrator: Vibrator? = null
-    private var vibrationEffect: VibrationEffect? = null
+    private var micButton: KeyboardCanvasView.Key? = null
 
     // ─── Batched Logging ─────────────────────────────────────────────────────
     private val logQueue = ConcurrentLinkedQueue<KeystrokeLog>()
-    private var logFlushJob: Job? = null
-    private var isInitialized = false
 
     enum class KeyboardMode { LETTERS, NUMBERS }
 
@@ -109,60 +95,138 @@ class DominionKeyboardIME : InputMethodService() {
 
     override fun onCreate() {
         super.onCreate()
-        // Only initialize lightweight prefs synchronously
         prefsManager = PrefsManager(applicationContext)
 
-        // Cache vibrator for zero-alloc haptics
-        initVibrator()
-
-        // Defer ALL heavy initialization to background
+        // Defer heavy init to background
         serviceScope.launch(Dispatchers.IO) {
             db = KeyboardDatabase.getInstance(applicationContext)
             openAIClient = OpenAIClient(applicationContext)
             predictiveEngine = PredictiveTextEngine(applicationContext)
-            isInitialized = true
-            Log.d(TAG, "DominionKeyboardIME background init complete")
+            Log.d(TAG, "Background init complete")
         }
 
-        // Start the batched log flusher
-        startLogFlusher()
-
-        Log.d(TAG, "DominionKeyboardIME created (fast path)")
+        // Start batched log flusher
+        serviceScope.launch(Dispatchers.IO) {
+            while (true) {
+                delay(LOG_FLUSH_INTERVAL_MS)
+                flushLogQueue()
+            }
+        }
     }
 
     override fun onCreateInputView(): View {
-        val inflater = LayoutInflater.from(this)
+        // Build the keyboard view programmatically — no XML inflation needed
+        val density = resources.displayMetrics.density
 
-        keyboardView = inflater.inflate(R.layout.keyboard_view, null)
-        numbersView = inflater.inflate(R.layout.keyboard_numbers, null)
+        rootView = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+            setBackgroundColor(0xFF0D0D1A.toInt())
+        }
 
-        val params = ViewGroup.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT
-        )
-        keyboardView!!.layoutParams = params
-        numbersView!!.layoutParams = params
+        // Suggestion bar
+        val suggestionBar = createSuggestionBar(density)
+        rootView!!.addView(suggestionBar)
 
-        setupLetterKeyboard(keyboardView!!)
-        setupNumberKeyboard(numbersView!!)
+        // Status bar (hidden by default)
+        statusBar = TextView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            setBackgroundColor(0x1A7B2FFF)
+            gravity = android.view.Gravity.CENTER
+            setPadding(0, (3 * density).toInt(), 0, (3 * density).toInt())
+            setTextColor(0xFFB388FF.toInt())
+            textSize = 11f
+            visibility = View.GONE
+        }
+        rootView!!.addView(statusBar)
 
-        return keyboardView!!
+        // Canvas keyboard
+        keyboardCanvas = KeyboardCanvasView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            keyListener = this@DominionKeyboardIME
+            setKeyboard(KeyboardCanvasView.createQwertyLayout())
+        }
+        rootView!!.addView(keyboardCanvas)
+
+        return rootView!!
+    }
+
+    private fun createSuggestionBar(density: Float): LinearLayout {
+        val height = (40 * density).toInt()
+        val bar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, height
+            )
+            setBackgroundColor(0xFF121228.toInt())
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding((4 * density).toInt(), 0, (4 * density).toInt(), 0)
+        }
+
+        val chipParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)
+
+        suggestion1 = createSuggestionChip(density)
+        suggestion2 = createSuggestionChip(density)
+        suggestion3 = createSuggestionChip(density)
+
+        suggestion1!!.layoutParams = chipParams
+        suggestion2!!.layoutParams = chipParams
+        suggestion3!!.layoutParams = chipParams
+
+        suggestion1!!.setOnClickListener { onSuggestionTapped(suggestion1?.text?.toString()) }
+        suggestion2!!.setOnClickListener { onSuggestionTapped(suggestion2?.text?.toString()) }
+        suggestion3!!.setOnClickListener { onSuggestionTapped(suggestion3?.text?.toString()) }
+
+        bar.addView(suggestion1)
+        bar.addView(createDivider(density))
+        bar.addView(suggestion2)
+        bar.addView(createDivider(density))
+        bar.addView(suggestion3)
+
+        return bar
+    }
+
+    private fun createSuggestionChip(density: Float): TextView {
+        return TextView(this).apply {
+            gravity = android.view.Gravity.CENTER
+            setTextColor(0xFFE8E8FF.toInt())
+            textSize = 14f
+            setPadding((12 * density).toInt(), 0, (12 * density).toInt(), 0)
+            isClickable = true
+            isFocusable = true
+        }
+    }
+
+    private fun createDivider(density: Float): View {
+        return View(this).apply {
+            layoutParams = LinearLayout.LayoutParams((1 * density).toInt(), (20 * density).toInt()).apply {
+                gravity = android.view.Gravity.CENTER_VERTICAL
+            }
+            setBackgroundColor(0xFF2A2A4A.toInt())
+        }
     }
 
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
-        // Start session log on background — non-blocking
         serviceScope.launch(Dispatchers.IO) {
             try {
-                val database = db ?: return@launch
-                sessionId = database.sessionLogDao().insert(
+                sessionId = db?.sessionLogDao()?.insert(
                     SessionLog(
                         startTime = Instant.now().toString(),
                         appPackage = currentInputEditorInfo?.packageName ?: "unknown"
                     )
-                )
+                ) ?: 0L
             } catch (e: Exception) {
-                Log.e(TAG, "Session log insert failed", e)
+                Log.e(TAG, "Session insert failed", e)
             }
         }
         currentWordBuffer.clear()
@@ -173,14 +237,10 @@ class DominionKeyboardIME : InputMethodService() {
         super.onFinishInputView(finishingInput)
         if (sessionId > 0) {
             serviceScope.launch(Dispatchers.IO) {
-                try {
-                    db?.sessionLogDao()?.closeSession(sessionId, Instant.now().toString())
-                } catch (e: Exception) {
-                    Log.e(TAG, "Session close failed", e)
-                }
+                try { db?.sessionLogDao()?.closeSession(sessionId, Instant.now().toString()) }
+                catch (e: Exception) { Log.e(TAG, "Session close failed", e) }
             }
         }
-        // Flush any remaining logs
         flushLogQueue()
         stopRecordingIfActive()
     }
@@ -193,100 +253,61 @@ class DominionKeyboardIME : InputMethodService() {
     }
 
     // ═════════════════════════════════════════════════════════════════════════
-    // KEYBOARD SETUP
+    // KEY LISTENER (from KeyboardCanvasView)
     // ═════════════════════════════════════════════════════════════════════════
 
-    private fun setupLetterKeyboard(view: View) {
-        suggestion1 = view.findViewById(R.id.suggestion_1)
-        suggestion2 = view.findViewById(R.id.suggestion_2)
-        suggestion3 = view.findViewById(R.id.suggestion_3)
-        statusBar = view.findViewById(R.id.status_bar)
-        micButton = view.findViewById(R.id.key_mic)
-
-        attachKeyListeners(view)
-
-        suggestion1?.setOnClickListener { onSuggestionTapped(suggestion1?.text?.toString()) }
-        suggestion2?.setOnClickListener { onSuggestionTapped(suggestion2?.text?.toString()) }
-        suggestion3?.setOnClickListener { onSuggestionTapped(suggestion3?.text?.toString()) }
-    }
-
-    private fun setupNumberKeyboard(view: View) {
-        attachKeyListeners(view)
-    }
-
-    private fun attachKeyListeners(root: View) {
-        if (root is ViewGroup) {
-            for (i in 0 until root.childCount) {
-                attachKeyListeners(root.getChildAt(i))
-            }
-        } else if (root is Button) {
-            root.setOnClickListener { v -> onKeyPressed(v as Button) }
-            if (root.tag == "DELETE") {
-                root.setOnLongClickListener {
-                    clearAllText()
-                    true
-                }
-            }
-            if (root.tag == "SHIFT") {
-                root.setOnLongClickListener {
-                    toggleCapsLock()
-                    true
-                }
-            }
-        }
-    }
-
-    // ═════════════════════════════════════════════════════════════════════════
-    // KEY PRESS HANDLING (HOT PATH — ZERO ALLOCATIONS)
-    // ═════════════════════════════════════════════════════════════════════════
-
-    private fun onKeyPressed(button: Button) {
-        val tag = button.tag?.toString() ?: return
-
-        // Haptic feedback via the view system (hardware-optimized, no allocation)
-        button.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-
-        when (tag) {
+    override fun onKeyPressed(key: KeyboardCanvasView.Key) {
+        when (key.tag) {
             "SHIFT" -> handleShift()
             "DELETE" -> handleDelete()
             "SPACE" -> handleSpace()
             "ENTER" -> handleEnter()
             "NUMBERS" -> switchToNumbers()
             "LETTERS" -> switchToLetters()
-            "SYMBOLS2" -> { /* Future expansion */ }
+            "SYMBOLS2" -> { /* Future */ }
             "MIC" -> handleMicToggle()
             "TRANSLATE" -> handleTranslate()
-            else -> handleCharacter(tag)
+            else -> handleCharacter(key.tag)
         }
     }
+
+    override fun onKeyLongPressed(key: KeyboardCanvasView.Key): Boolean {
+        return when (key.tag) {
+            "DELETE" -> { clearAllText(); true }
+            "SHIFT" -> { toggleCapsLock(); true }
+            else -> false
+        }
+    }
+
+    override fun onKeyReleased(key: KeyboardCanvasView.Key) {
+        // No-op for now; could be used for key-repeat on DELETE
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // KEY ACTIONS
+    // ═════════════════════════════════════════════════════════════════════════
 
     private fun handleCharacter(char: String) {
         val ic = currentInputConnection ?: return
         val output = if (isShifted || isCapsLock) char.uppercase() else char.lowercase()
         ic.commitText(output, 1)
-
-        // Queue log (batched, non-blocking)
-        queueKeystrokeLog(output, "character")
-
-        // Update word buffer for predictions
+        queueLog(output, "character")
         currentWordBuffer.append(output)
         updateSuggestionsDebounced(currentWordBuffer.toString())
 
-        // Auto-unshift after one capital letter (unless caps lock)
         if (isShifted && !isCapsLock) {
             isShifted = false
-            updateShiftState()
+            keyboardCanvas?.setShiftState(isShifted, isCapsLock)
         }
     }
 
     private fun handleSpace() {
         val ic = currentInputConnection ?: return
         ic.commitText(" ", 1)
-        queueKeystrokeLog(" ", "space")
-
+        queueLog(" ", "space")
         val word = currentWordBuffer.toString().trim()
         if (word.isNotEmpty()) {
-            queueKeystrokeLog(word, "word_complete")
+            queueLog(word, "word_complete")
             predictiveEngine?.learnWord(word)
         }
         currentWordBuffer.clear()
@@ -301,26 +322,22 @@ class DominionKeyboardIME : InputMethodService() {
         } else {
             ic.commitText("\n", 1)
         }
-        queueKeystrokeLog("\n", "enter")
-
+        queueLog("\n", "enter")
         val word = currentWordBuffer.toString().trim()
-        if (word.isNotEmpty()) {
-            queueKeystrokeLog(word, "word_complete")
-        }
+        if (word.isNotEmpty()) queueLog(word, "word_complete")
         currentWordBuffer.clear()
         updateSuggestionsDebounced("")
     }
 
     private fun handleDelete() {
         val ic = currentInputConnection ?: return
-        val selectedText = ic.getSelectedText(0)
-        if (!selectedText.isNullOrEmpty()) {
+        val selected = ic.getSelectedText(0)
+        if (!selected.isNullOrEmpty()) {
             ic.commitText("", 1)
         } else {
             ic.deleteSurroundingText(1, 0)
         }
-        queueKeystrokeLog("", "delete")
-
+        queueLog("", "delete")
         if (currentWordBuffer.isNotEmpty()) {
             currentWordBuffer.deleteCharAt(currentWordBuffer.length - 1)
             updateSuggestionsDebounced(currentWordBuffer.toString())
@@ -333,11 +350,8 @@ class DominionKeyboardIME : InputMethodService() {
             toggleCapsLock()
         } else {
             isShifted = !isShifted
-            if (isCapsLock) {
-                isCapsLock = false
-                isShifted = false
-            }
-            updateShiftState()
+            if (isCapsLock) { isCapsLock = false; isShifted = false }
+            keyboardCanvas?.setShiftState(isShifted, isCapsLock)
         }
         lastShiftTapTime = now
     }
@@ -345,33 +359,7 @@ class DominionKeyboardIME : InputMethodService() {
     private fun toggleCapsLock() {
         isCapsLock = !isCapsLock
         isShifted = isCapsLock
-        updateShiftState()
-    }
-
-    private fun updateShiftState() {
-        val view = if (currentView == KeyboardMode.LETTERS) keyboardView else return
-        if (view == null) return
-        updateKeyLabels(view)
-        val shiftBtn = view.findViewWithTag<Button>("SHIFT")
-        shiftBtn?.alpha = when {
-            isCapsLock -> 1.0f
-            isShifted -> 0.85f
-            else -> 0.6f
-        }
-        shiftBtn?.text = if (isCapsLock) "⇪" else "⇧"
-    }
-
-    private fun updateKeyLabels(root: View) {
-        if (root is ViewGroup) {
-            for (i in 0 until root.childCount) {
-                updateKeyLabels(root.getChildAt(i))
-            }
-        } else if (root is Button) {
-            val tag = root.tag?.toString() ?: return
-            if (tag.length == 1 && tag[0].isLetter()) {
-                root.text = if (isShifted || isCapsLock) tag.uppercase() else tag.lowercase()
-            }
-        }
+        keyboardCanvas?.setShiftState(isShifted, isCapsLock)
     }
 
     private fun clearAllText() {
@@ -385,17 +373,18 @@ class DominionKeyboardIME : InputMethodService() {
     }
 
     private fun switchToNumbers() {
-        currentView = KeyboardMode.NUMBERS
-        setInputView(numbersView!!)
+        currentMode = KeyboardMode.NUMBERS
+        keyboardCanvas?.setKeyboard(KeyboardCanvasView.createNumbersLayout())
     }
 
     private fun switchToLetters() {
-        currentView = KeyboardMode.LETTERS
-        setInputView(keyboardView!!)
+        currentMode = KeyboardMode.LETTERS
+        keyboardCanvas?.setKeyboard(KeyboardCanvasView.createQwertyLayout())
+        keyboardCanvas?.setShiftState(isShifted, isCapsLock)
     }
 
     // ═════════════════════════════════════════════════════════════════════════
-    // DEBOUNCED SUGGESTIONS (prevents coroutine spam on fast typing)
+    // DEBOUNCED SUGGESTIONS
     // ═════════════════════════════════════════════════════════════════════════
 
     private fun updateSuggestionsDebounced(prefix: String) {
@@ -415,90 +404,59 @@ class DominionKeyboardIME : InputMethodService() {
     private fun onSuggestionTapped(word: String?) {
         if (word.isNullOrBlank()) return
         val ic = currentInputConnection ?: return
-
         if (currentWordBuffer.isNotEmpty()) {
             ic.deleteSurroundingText(currentWordBuffer.length, 0)
         }
-
         ic.commitText("$word ", 1)
-        queueKeystrokeLog(word, "word_complete")
+        queueLog(word, "word_complete")
         predictiveEngine?.learnWord(word)
         currentWordBuffer.clear()
         updateSuggestionsDebounced("")
     }
 
     // ═════════════════════════════════════════════════════════════════════════
-    // BATCHED KEYSTROKE LOGGING (writes every 2s instead of per-character)
+    // BATCHED LOGGING
     // ═════════════════════════════════════════════════════════════════════════
 
-    private fun queueKeystrokeLog(value: String, type: String) {
+    private fun queueLog(value: String, type: String) {
         if (!prefsManager.isKeystrokeLoggingEnabled()) return
-        logQueue.add(
-            KeystrokeLog(
-                sessionId = sessionId,
-                keystrokeValue = value,
-                keystrokeType = type,
-                timestamp = Instant.now().toString(),
-                appPackage = currentInputEditorInfo?.packageName ?: "unknown"
-            )
-        )
-    }
-
-    private fun startLogFlusher() {
-        logFlushJob = serviceScope.launch(Dispatchers.IO) {
-            while (true) {
-                delay(LOG_FLUSH_INTERVAL_MS)
-                flushLogQueue()
-            }
-        }
+        logQueue.add(KeystrokeLog(
+            sessionId = sessionId,
+            keystrokeValue = value,
+            keystrokeType = type,
+            timestamp = Instant.now().toString(),
+            appPackage = currentInputEditorInfo?.packageName ?: "unknown"
+        ))
     }
 
     private fun flushLogQueue() {
         if (logQueue.isEmpty()) return
         serviceScope.launch(Dispatchers.IO) {
             try {
-                val database = db ?: return@launch
                 val batch = mutableListOf<KeystrokeLog>()
-                while (logQueue.isNotEmpty()) {
-                    logQueue.poll()?.let { batch.add(it) }
-                }
-                if (batch.isNotEmpty()) {
-                    database.keystrokeLogDao().insertAll(batch)
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Batch log flush failed", e)
-            }
+                while (logQueue.isNotEmpty()) { logQueue.poll()?.let { batch.add(it) } }
+                if (batch.isNotEmpty()) db?.keystrokeLogDao()?.insertAll(batch)
+            } catch (e: Exception) { Log.e(TAG, "Log flush failed", e) }
         }
     }
 
     // ═════════════════════════════════════════════════════════════════════════
-    // VOICE DICTATION (WHISPER — kept for accuracy)
+    // VOICE DICTATION (WHISPER)
     // ═════════════════════════════════════════════════════════════════════════
 
     private fun handleMicToggle() {
-        if (isRecording) {
-            stopRecordingAndTranscribe()
-        } else {
-            startRecording()
-        }
+        if (isRecording) stopRecordingAndTranscribe() else startRecording()
     }
 
     private fun startRecording() {
         val apiKey = prefsManager.getApiKey()
-        if (apiKey.isNullOrBlank()) {
-            showToast(getString(R.string.error_no_api_key))
-            return
-        }
+        if (apiKey.isNullOrBlank()) { showToast(getString(R.string.error_no_api_key)); return }
 
         audioFile = File(cacheDir, AUDIO_FILE_NAME)
-
         try {
             mediaRecorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 MediaRecorder(applicationContext)
-            } else {
-                @Suppress("DEPRECATION")
-                MediaRecorder()
-            }
+            } else { @Suppress("DEPRECATION") MediaRecorder() }
 
             mediaRecorder?.apply {
                 setAudioSource(MediaRecorder.AudioSource.MIC)
@@ -510,144 +468,78 @@ class DominionKeyboardIME : InputMethodService() {
                 prepare()
                 start()
             }
-
             isRecording = true
-            micButton?.isActivated = true
-            micButton?.text = "⏹"
             showStatus("🎤 Listening…")
-            queueKeystrokeLog("", "mic_start")
-
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to start recording", e)
+            Log.e(TAG, "Mic error", e)
             showToast("Microphone error: ${e.message}")
-            mediaRecorder?.release()
-            mediaRecorder = null
+            mediaRecorder?.release(); mediaRecorder = null
         }
     }
 
     private fun stopRecordingAndTranscribe() {
-        try {
-            mediaRecorder?.stop()
-            mediaRecorder?.release()
-            mediaRecorder = null
-        } catch (e: Exception) {
-            Log.e(TAG, "Error stopping recorder", e)
-        }
+        try { mediaRecorder?.stop(); mediaRecorder?.release(); mediaRecorder = null }
+        catch (e: Exception) { Log.e(TAG, "Stop error", e) }
 
         isRecording = false
-        micButton?.isActivated = false
-        micButton?.text = "🎤"
         showStatus("⏳ Processing…")
 
         val file = audioFile ?: return
-        if (!file.exists() || file.length() == 0L) {
-            hideStatus()
-            showToast("No audio captured")
-            return
-        }
+        if (!file.exists() || file.length() == 0L) { hideStatus(); showToast("No audio"); return }
 
         serviceScope.launch {
             try {
-                val client = openAIClient ?: run {
-                    hideStatus()
-                    showToast("AI not ready yet")
-                    return@launch
-                }
-                val transcript = withContext(Dispatchers.IO) {
-                    client.transcribeAudio(file)
-                }
+                val transcript = withContext(Dispatchers.IO) { openAIClient?.transcribeAudio(file) }
                 if (transcript != null) {
                     currentInputConnection?.commitText(transcript, 1)
-                    queueKeystrokeLog(transcript, "whisper_dictation")
+                    queueLog(transcript, "whisper_dictation")
                     currentWordBuffer.clear()
                     updateSuggestionsDebounced("")
                 }
                 hideStatus()
             } catch (e: Exception) {
                 Log.e(TAG, "Transcription error", e)
-                showToast(getString(R.string.error_network))
-                hideStatus()
+                showToast(getString(R.string.error_network)); hideStatus()
             }
         }
     }
 
     private fun stopRecordingIfActive() {
         if (isRecording) {
-            try {
-                mediaRecorder?.stop()
-                mediaRecorder?.release()
-                mediaRecorder = null
-            } catch (e: Exception) {
-                Log.e(TAG, "Error stopping recorder on destroy", e)
-            }
+            try { mediaRecorder?.stop(); mediaRecorder?.release(); mediaRecorder = null }
+            catch (e: Exception) { Log.e(TAG, "Stop error", e) }
             isRecording = false
         }
     }
 
     // ═════════════════════════════════════════════════════════════════════════
-    // SPANISH TRANSLATION
+    // TRANSLATION
     // ═════════════════════════════════════════════════════════════════════════
 
     private fun handleTranslate() {
         val apiKey = prefsManager.getApiKey()
-        if (apiKey.isNullOrBlank()) {
-            showToast(getString(R.string.error_no_api_key))
-            return
-        }
+        if (apiKey.isNullOrBlank()) { showToast(getString(R.string.error_no_api_key)); return }
 
         val ic = currentInputConnection ?: return
-        val textBeforeCursor = ic.getTextBeforeCursor(500, 0)?.toString() ?: ""
-        if (textBeforeCursor.isBlank()) {
-            showToast("Nothing to translate")
-            return
-        }
+        val text = ic.getTextBeforeCursor(500, 0)?.toString() ?: ""
+        if (text.isBlank()) { showToast("Nothing to translate"); return }
 
         showStatus("🌐 Translating…")
-
         serviceScope.launch {
             try {
-                val client = openAIClient ?: run {
-                    hideStatus()
-                    showToast("AI not ready yet")
-                    return@launch
-                }
-                val translated = withContext(Dispatchers.IO) {
-                    client.translateToSpanish(textBeforeCursor)
-                }
+                val translated = withContext(Dispatchers.IO) { openAIClient?.translateToSpanish(text) }
                 if (translated != null) {
                     ic.beginBatchEdit()
-                    ic.deleteSurroundingText(textBeforeCursor.length, 0)
+                    ic.deleteSurroundingText(text.length, 0)
                     ic.commitText(translated, 1)
                     ic.endBatchEdit()
-                    queueKeystrokeLog(translated, "translation_es")
+                    queueLog(translated, "translation_es")
                 }
                 hideStatus()
             } catch (e: Exception) {
                 Log.e(TAG, "Translation error", e)
-                showToast(getString(R.string.error_network))
-                hideStatus()
+                showToast(getString(R.string.error_network)); hideStatus()
             }
-        }
-    }
-
-    // ═════════════════════════════════════════════════════════════════════════
-    // HAPTIC FEEDBACK (cached, zero-allocation)
-    // ═════════════════════════════════════════════════════════════════════════
-
-    private fun initVibrator() {
-        try {
-            vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                val vm = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
-                vm.defaultVibrator
-            } else {
-                @Suppress("DEPRECATION")
-                getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                vibrationEffect = VibrationEffect.createOneShot(20, VibrationEffect.DEFAULT_AMPLITUDE)
-            }
-        } catch (e: Exception) {
-            // Non-critical
         }
     }
 
@@ -655,16 +547,7 @@ class DominionKeyboardIME : InputMethodService() {
     // UI HELPERS
     // ═════════════════════════════════════════════════════════════════════════
 
-    private fun showStatus(message: String) {
-        statusBar?.text = message
-        statusBar?.visibility = View.VISIBLE
-    }
-
-    private fun hideStatus() {
-        statusBar?.visibility = View.GONE
-    }
-
-    private fun showToast(message: String) {
-        Toast.makeText(applicationContext, message, Toast.LENGTH_SHORT).show()
-    }
+    private fun showStatus(msg: String) { statusBar?.text = msg; statusBar?.visibility = View.VISIBLE }
+    private fun hideStatus() { statusBar?.visibility = View.GONE }
+    private fun showToast(msg: String) { Toast.makeText(applicationContext, msg, Toast.LENGTH_SHORT).show() }
 }
