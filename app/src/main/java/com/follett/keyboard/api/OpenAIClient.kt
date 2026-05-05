@@ -163,6 +163,41 @@ class OpenAIClient(private val context: Context) {
     }
 
     // ═════════════════════════════════════════════════════════════════════════
+    // GPT AUTOCORRECT — Context-aware typo correction
+    // ═════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Uses GPT to correct a sentence with context awareness.
+     * This is the GBoard-equivalent approach: use a language model to understand
+     * what the user MEANT based on the full sentence context.
+     *
+     * Called after the user finishes a sentence (period, send, etc.)
+     * to retroactively fix typos the edit-distance engine missed.
+     */
+    suspend fun correctWithContext(sentence: String): String? {
+        val apiKey = prefs.getApiKey() ?: return null
+        if (sentence.isBlank() || sentence.length < 10) return null
+
+        return try {
+            val systemPrompt = """You are an autocorrect engine. Fix ONLY typos and misspellings in the user's text.
+                |Rules:
+                |- Fix misspelled words to their most likely intended word
+                |- Preserve the user's exact meaning, tone, and style
+                |- Do NOT change grammar, add words, or rephrase
+                |- Do NOT add punctuation or capitalization the user didn't include
+                |- If the text has no typos, return it EXACTLY as-is
+                |- Return ONLY the corrected text, nothing else
+                |Example: "I wnet to teh store" → "I went to the store"
+                |Example: "thats awsome" → "thats awesome"""".trimMargin()
+
+            chatCompletion(apiKey, systemPrompt, sentence, 0.1, 200)
+        } catch (e: Exception) {
+            Log.e(TAG, "Context correction error", e)
+            null
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
     // AGENTIC — Intent detection for MCP routing (Phase 3)
     // ═════════════════════════════════════════════════════════════════════════
 

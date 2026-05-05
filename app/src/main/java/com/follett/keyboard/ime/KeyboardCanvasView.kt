@@ -323,9 +323,9 @@ class KeyboardCanvasView @JvmOverloads constructor(
     // ═════════════════════════════════════════════════════════════════════════
 
     // Keys that have long-press actions — character commit is DELAYED for these
-    private val longPressKeys = setOf("SHIFT", "ENTER", "EMOJI", "SPACE")
+    private val longPressKeys = setOf("SHIFT", "ENTER", "SPACE")
     // Keys that fire immediately on DOWN (no delay)
-    private val immediateKeys = setOf("DELETE", "NUMBERS", "LETTERS", "MIC", "TRANSLATE")
+    private val immediateKeys = setOf("DELETE", "SPACE", "NUMBERS", "LETTERS", "MIC", "EMOJI", "TRANSLATE")
     private var pendingKeyCommit: Runnable? = null
     private val tapCommitDelay = 100L  // ms to wait before committing long-press keys
 
@@ -531,14 +531,15 @@ class KeyboardCanvasView @JvmOverloads constructor(
             }
             keys.add(Key("⌫", "DELETE", 2, 8.5f, 1.5f, KeyStyle.ACTION))
 
-            // Row 3: GBoard-style — ?123 | , | 😀 | SPACE | . | ↵
-            // Emoji button replaces MIC (MIC is long-press on emoji)
-            keys.add(Key("?123", "NUMBERS", 3, 0f, 1.5f, KeyStyle.SPECIAL))
-            keys.add(Key(",", ",", 3, 1.5f, 1f))
-            keys.add(Key("😀", "EMOJI", 3, 2.5f, 1f, KeyStyle.SPECIAL))
-            keys.add(Key("", "SPACE", 3, 3.5f, 4f))
-            keys.add(Key(".", ".", 3, 7.5f, 1f))
-            keys.add(Key("↵", "ENTER", 3, 8.5f, 1.5f, KeyStyle.ACTION))
+            // Row 3: ?123 | 😀 | , | SPACE | . | 🎤 | ↵
+            // Both emoji and mic are always visible
+            keys.add(Key("?123", "NUMBERS", 3, 0f, 1.2f, KeyStyle.SPECIAL))
+            keys.add(Key("😀", "EMOJI", 3, 1.2f, 1f, KeyStyle.SPECIAL))
+            keys.add(Key(",", ",", 3, 2.2f, 0.8f))
+            keys.add(Key("", "SPACE", 3, 3f, 4f))
+            keys.add(Key(".", ".", 3, 7f, 0.8f))
+            keys.add(Key("🎤", "MIC", 3, 7.8f, 1f, KeyStyle.MIC))
+            keys.add(Key("↵", "ENTER", 3, 8.8f, 1.2f, KeyStyle.ACTION))
 
             return KeyboardLayout(keys, 4, 10f)
         }

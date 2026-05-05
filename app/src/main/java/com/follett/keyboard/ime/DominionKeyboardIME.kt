@@ -318,8 +318,7 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
         return when (key.tag) {
             "SHIFT" -> { toggleCapsLock(); true }
             "ENTER" -> { performEnterAction(); true }
-            "EMOJI" -> { handleMicToggle(); true }  // Long-press emoji = mic
-            "SPACE" -> { switchToClipboard(); true } // Long-press space = clipboard
+            "SPACE" -> { switchToClipboard(); true }
             else -> false
         }
     }
@@ -493,28 +492,61 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
 
     /**
      * Long-press Enter = execute the app's IME action (Send, Search, Go, etc.)
-     * This allows the user to send messages without reaching for the app's button.
+     * Before sending, runs GPT autocorrect on the full sentence for context-aware correction.
      */
     private fun performEnterAction() {
         val ic = currentInputConnection ?: return
         if (isComposing) { ic.finishComposingText(); isComposing = false }
 
-        // Capture the full message before sending (Input Intelligence)
-        if (!isPasswordField && sentenceBuffer.isNotEmpty()) {
-            val fullMessage = sentenceBuffer.toString().trim()
-            serviceScope.launch(Dispatchers.IO) {
-                inputIntelligence?.captureMessage(
-                    fullText = fullMessage,
-                    editorInfo = currentInputEditorInfo
-                )
-            }
-        }
+        // GPT context-aware autocorrect before sending
+        val textBeforeSend = ic.getTextBeforeCursor(500, 0)?.toString() ?: ""
+        if (!isPasswordField && textBeforeSend.length >= 10 && prefsManager.isSmartComposeEnabled()) {
+            serviceScope.launch {
+                val corrected = withContext(Dispatchers.IO) {
+                    openAIClient?.correctWithContext(textBeforeSend)
+                }
+                if (corrected != null && corrected != textBeforeSend && corrected.isNotBlank()) {
+                    // Replace the text with corrected version
+                    ic.beginBatchEdit()
+                    ic.deleteSurroundingText(textBeforeSend.length, 0)
+                    ic.commitText(corrected, 1)
+                    ic.endBatchEdit()
+                }
 
-        val imeAction = currentInputEditorInfo?.imeOptions?.and(EditorInfo.IME_MASK_ACTION)
-        if (imeAction != null && imeAction != EditorInfo.IME_ACTION_NONE) {
-            ic.performEditorAction(imeAction)
+                // Now send
+                val imeAction = currentInputEditorInfo?.imeOptions?.and(EditorInfo.IME_MASK_ACTION)
+                if (imeAction != null && imeAction != EditorInfo.IME_ACTION_NONE) {
+                    ic.performEditorAction(imeAction)
+                } else {
+                    ic.commitText("\n", 1)
+                }
+
+                // Capture for Input Intelligence
+                val finalText = corrected ?: textBeforeSend
+                withContext(Dispatchers.IO) {
+                    inputIntelligence?.captureMessage(
+                        fullText = finalText.trim(),
+                        editorInfo = currentInputEditorInfo
+                    )
+                }
+            }
         } else {
-            ic.commitText("\n", 1)
+            // No GPT correction — just send immediately
+            if (!isPasswordField && sentenceBuffer.isNotEmpty()) {
+                serviceScope.launch(Dispatchers.IO) {
+                    inputIntelligence?.captureMessage(
+                        fullText = sentenceBuffer.toString().trim(),
+                        editorInfo = currentInputEditorInfo
+                    )
+                }
+            }
+
+            val imeAction = currentInputEditorInfo?.imeOptions?.and(EditorInfo.IME_MASK_ACTION)
+            if (imeAction != null && imeAction != EditorInfo.IME_ACTION_NONE) {
+                ic.performEditorAction(imeAction)
+            } else {
+                ic.commitText("\n", 1)
+            }
         }
 
         if (!isPasswordField) queueLog("\n", "enter_action")
