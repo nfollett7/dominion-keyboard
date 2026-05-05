@@ -323,9 +323,9 @@ class KeyboardCanvasView @JvmOverloads constructor(
     // ═════════════════════════════════════════════════════════════════════════
 
     // Keys that have long-press actions — character commit is DELAYED for these
-    private val longPressKeys = setOf("SHIFT", "ENTER", ",", ".")
+    private val longPressKeys = setOf("SHIFT", "ENTER", "EMOJI", "SPACE")
     // Keys that fire immediately on DOWN (no delay)
-    private val immediateKeys = setOf("DELETE", "SPACE", "NUMBERS", "LETTERS", "MIC", "TRANSLATE")
+    private val immediateKeys = setOf("DELETE", "NUMBERS", "LETTERS", "MIC", "TRANSLATE")
     private var pendingKeyCommit: Runnable? = null
     private val tapCommitDelay = 100L  // ms to wait before committing long-press keys
 
@@ -531,10 +531,11 @@ class KeyboardCanvasView @JvmOverloads constructor(
             }
             keys.add(Key("⌫", "DELETE", 2, 8.5f, 1.5f, KeyStyle.ACTION))
 
-            // Row 3: GBoard-style — ?123 | , | 🎤 | SPACE | . | ↵
+            // Row 3: GBoard-style — ?123 | , | 😀 | SPACE | . | ↵
+            // Emoji button replaces MIC (MIC is long-press on emoji)
             keys.add(Key("?123", "NUMBERS", 3, 0f, 1.5f, KeyStyle.SPECIAL))
             keys.add(Key(",", ",", 3, 1.5f, 1f))
-            keys.add(Key("🎤", "MIC", 3, 2.5f, 1f, KeyStyle.MIC))
+            keys.add(Key("😀", "EMOJI", 3, 2.5f, 1f, KeyStyle.SPECIAL))
             keys.add(Key("", "SPACE", 3, 3.5f, 4f))
             keys.add(Key(".", ".", 3, 7.5f, 1f))
             keys.add(Key("↵", "ENTER", 3, 8.5f, 1.5f, KeyStyle.ACTION))

@@ -305,6 +305,7 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
             "ENTER" -> handleEnter()
             "NUMBERS" -> switchToNumbers()
             "LETTERS" -> switchToLetters()
+            "EMOJI" -> switchToEmoji()
             "MIC" -> handleMicToggle()
             "TRANSLATE" -> handleTranslate()
             "," -> handlePunctuation(",")
@@ -317,8 +318,8 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
         return when (key.tag) {
             "SHIFT" -> { toggleCapsLock(); true }
             "ENTER" -> { performEnterAction(); true }
-            "," -> { switchToEmoji(); true }
-            "." -> { switchToClipboard(); true }
+            "EMOJI" -> { handleMicToggle(); true }  // Long-press emoji = mic
+            "SPACE" -> { switchToClipboard(); true } // Long-press space = clipboard
             else -> false
         }
     }
@@ -428,19 +429,40 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
 
     private fun handlePunctuation(char: String) {
         val ic = currentInputConnection ?: return
-        if (isComposing) { ic.finishComposingText(); isComposing = false }
+        val word = currentWordBuffer.toString().trim()
+
+        // Autocorrect the composing word before punctuation (same as space)
+        var committedWord = word
+        if (isComposing && word.length >= 3 && !isPasswordField) {
+            val engine = predictiveEngine
+            if (engine != null && !engine.isValidWord(word)) {
+                val corrections = engine.getAutocorrectCandidates(word, 1)
+                if (corrections.isNotEmpty()) {
+                    ic.setComposingText(corrections[0], 1)
+                    committedWord = corrections[0]
+                }
+            }
+            ic.finishComposingText()
+            isComposing = false
+        } else if (isComposing) {
+            ic.finishComposingText()
+            isComposing = false
+        }
+
+        // ALWAYS commit the punctuation character
         ic.commitText(char, 1)
 
-        val word = currentWordBuffer.toString().trim()
         if (!isPasswordField) {
             queueLog(char, "character")
-            if (word.isNotEmpty()) {
-                queueLog(word, "word_complete")
-                predictiveEngine?.learnWord(word)
-                appendToSentenceBuffer(word + char)
+            if (committedWord.isNotEmpty()) {
+                queueLog(committedWord, "word_complete")
+                predictiveEngine?.learnWord(committedWord)
+                appendToSentenceBuffer(committedWord + char)
             }
         }
         currentWordBuffer.clear()
+        lastCommittedSuggestion = null
+        originalWordBeforeSuggestion = null
 
         // Auto-capitalize after sentence-ending punctuation
         if (char in listOf(".", "!", "?") && prefsManager.isAutoCapitalizeEnabled()) {
