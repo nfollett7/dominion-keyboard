@@ -317,7 +317,6 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
     override fun onKeyLongPressed(key: KeyboardCanvasView.Key): Boolean {
         return when (key.tag) {
             "SHIFT" -> { toggleCapsLock(); true }
-            "ENTER" -> { performEnterAction(); true }
             "SPACE" -> { switchToClipboard(); true }
             else -> false
         }
@@ -375,10 +374,8 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
         if (prefsManager.isAutoPunctuateEnabled() && word.isEmpty()) {
             val before = ic.getTextBeforeCursor(2, 0)?.toString() ?: ""
             if (before == " " || before.endsWith(" ")) {
-                // Replace trailing space with period + space
                 ic.deleteSurroundingText(1, 0)
                 ic.commitText(". ", 1)
-                // Auto-capitalize after period
                 if (prefsManager.isAutoCapitalizeEnabled()) {
                     isShifted = true
                     keyboardCanvas?.setShiftState(true, false)
@@ -387,86 +384,58 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
             }
         }
 
-        // AUTOCORRECT (GBoard-style rules):
-        // 1. NEVER autocorrect single-character words (a, I, etc.)
-        // 2. NEVER autocorrect if the word IS in the dictionary (it's valid)
-        // 3. Uses edit distance to find corrections for actual typos
-        // 4. Only autocorrect words 3+ characters long
-        var committedWord = word
-        if (isComposing && word.length >= 3 && !isPasswordField) {
-            val engine = predictiveEngine
-            if (engine != null && !engine.isValidWord(word)) {
-                // Use edit-distance matching for real typo correction
-                val corrections = engine.getAutocorrectCandidates(word, 1)
-                if (corrections.isNotEmpty()) {
-                    val corrected = corrections[0]
-                    ic.setComposingText(corrected, 1)
-                    committedWord = corrected
-                    originalWordBeforeSuggestion = word
-                    lastCommittedSuggestion = corrected
-                }
-            }
-            ic.finishComposingText()
-            isComposing = false
-        } else if (isComposing) {
+        // Commit the composing word as-is (no local autocorrect)
+        if (isComposing) {
             ic.finishComposingText()
             isComposing = false
         }
         ic.commitText(" ", 1)
 
-        if (!isPasswordField) {
+        if (!isPasswordField && word.isNotEmpty()) {
             queueLog(" ", "space")
-            if (committedWord.isNotEmpty()) {
-                queueLog(committedWord, "word_complete")
-                predictiveEngine?.learnWord(committedWord)
-                appendToSentenceBuffer(committedWord + " ")
+            queueLog(word, "word_complete")
+            predictiveEngine?.learnWord(word)
+            appendToSentenceBuffer("$word ")
+
+            // GPT autocorrect: after accumulating a few words, correct the sentence
+            // This runs in background and silently fixes typos
+            if (prefsManager.isSmartComposeEnabled() && sentenceBuffer.length >= 15) {
+                triggerGPTAutocorrect()
             }
-            updateSuggestionsDebounced("")
         }
         currentWordBuffer.clear()
+        updateSuggestionsDebounced("")
     }
 
     private fun handlePunctuation(char: String) {
         val ic = currentInputConnection ?: return
         val word = currentWordBuffer.toString().trim()
 
-        // Autocorrect the composing word before punctuation (same as space)
-        var committedWord = word
-        if (isComposing && word.length >= 3 && !isPasswordField) {
-            val engine = predictiveEngine
-            if (engine != null && !engine.isValidWord(word)) {
-                val corrections = engine.getAutocorrectCandidates(word, 1)
-                if (corrections.isNotEmpty()) {
-                    ic.setComposingText(corrections[0], 1)
-                    committedWord = corrections[0]
-                }
-            }
-            ic.finishComposingText()
-            isComposing = false
-        } else if (isComposing) {
+        // Commit composing word as-is, then commit punctuation
+        if (isComposing) {
             ic.finishComposingText()
             isComposing = false
         }
-
-        // ALWAYS commit the punctuation character
+        // ALWAYS commit punctuation — never eat it
         ic.commitText(char, 1)
 
-        if (!isPasswordField) {
-            queueLog(char, "character")
-            if (committedWord.isNotEmpty()) {
-                queueLog(committedWord, "word_complete")
-                predictiveEngine?.learnWord(committedWord)
-                appendToSentenceBuffer(committedWord + char)
-            }
+        if (!isPasswordField && word.isNotEmpty()) {
+            queueLog(word, "word_complete")
+            predictiveEngine?.learnWord(word)
+            appendToSentenceBuffer(word + char)
         }
         currentWordBuffer.clear()
-        lastCommittedSuggestion = null
-        originalWordBeforeSuggestion = null
 
         // Auto-capitalize after sentence-ending punctuation
         if (char in listOf(".", "!", "?") && prefsManager.isAutoCapitalizeEnabled()) {
             isShifted = true
             keyboardCanvas?.setShiftState(true, false)
+
+            // Trigger GPT autocorrect on sentence end
+            if (!isPasswordField && prefsManager.isSmartComposeEnabled() && sentenceBuffer.length >= 10) {
+                triggerGPTAutocorrect()
+                sentenceBuffer.clear()
+            }
         }
 
         if (!isPasswordField) updateSuggestionsDebounced("")
@@ -491,68 +460,35 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
     }
 
     /**
-     * Long-press Enter = execute the app's IME action (Send, Search, Go, etc.)
-     * Before sending, runs GPT autocorrect on the full sentence for context-aware correction.
+     * GPT autocorrect: silently corrects the text the user has typed so far.
+     * Runs in background after sentence-ending punctuation or after enough words.
+     * Replaces the visible text with the corrected version.
      */
-    private fun performEnterAction() {
-        val ic = currentInputConnection ?: return
-        if (isComposing) { ic.finishComposingText(); isComposing = false }
+    private var gptCorrectionJob: Job? = null
 
-        // GPT context-aware autocorrect before sending
-        val textBeforeSend = ic.getTextBeforeCursor(500, 0)?.toString() ?: ""
-        if (!isPasswordField && textBeforeSend.length >= 3 && prefsManager.isSmartComposeEnabled()) {
-            serviceScope.launch {
-                val corrected = withContext(Dispatchers.IO) {
-                    openAIClient?.correctWithContext(textBeforeSend)
-                }
-                if (corrected != null && corrected != textBeforeSend && corrected.isNotBlank()) {
-                    // Replace the text with corrected version
-                    ic.beginBatchEdit()
-                    ic.deleteSurroundingText(textBeforeSend.length, 0)
-                    ic.commitText(corrected, 1)
-                    ic.endBatchEdit()
-                }
+    private fun triggerGPTAutocorrect() {
+        gptCorrectionJob?.cancel()
+        gptCorrectionJob = serviceScope.launch {
+            delay(300)  // Small delay to batch rapid typing
+            val ic = currentInputConnection ?: return@launch
+            val client = openAIClient ?: return@launch
 
-                // Now send
-                val imeAction = currentInputEditorInfo?.imeOptions?.and(EditorInfo.IME_MASK_ACTION)
-                if (imeAction != null && imeAction != EditorInfo.IME_ACTION_NONE) {
-                    ic.performEditorAction(imeAction)
-                } else {
-                    ic.commitText("\n", 1)
-                }
+            // Get the text the user has typed in this session
+            val currentText = ic.getTextBeforeCursor(500, 0)?.toString() ?: return@launch
+            if (currentText.length < 10) return@launch
 
-                // Capture for Input Intelligence
-                val finalText = corrected ?: textBeforeSend
-                withContext(Dispatchers.IO) {
-                    inputIntelligence?.captureMessage(
-                        fullText = finalText.trim(),
-                        editorInfo = currentInputEditorInfo
-                    )
-                }
-            }
-        } else {
-            // No GPT correction — just send immediately
-            if (!isPasswordField && sentenceBuffer.isNotEmpty()) {
-                serviceScope.launch(Dispatchers.IO) {
-                    inputIntelligence?.captureMessage(
-                        fullText = sentenceBuffer.toString().trim(),
-                        editorInfo = currentInputEditorInfo
-                    )
-                }
+            val corrected = withContext(Dispatchers.IO) {
+                client.correctWithContext(currentText)
             }
 
-            val imeAction = currentInputEditorInfo?.imeOptions?.and(EditorInfo.IME_MASK_ACTION)
-            if (imeAction != null && imeAction != EditorInfo.IME_ACTION_NONE) {
-                ic.performEditorAction(imeAction)
-            } else {
-                ic.commitText("\n", 1)
+            // Only replace if GPT actually changed something
+            if (corrected != null && corrected != currentText && corrected.isNotBlank()) {
+                ic.beginBatchEdit()
+                ic.deleteSurroundingText(currentText.length, 0)
+                ic.commitText(corrected, 1)
+                ic.endBatchEdit()
             }
         }
-
-        if (!isPasswordField) queueLog("\n", "enter_action")
-        currentWordBuffer.clear()
-        sentenceBuffer.clear()
-        if (!isPasswordField) updateSuggestionsDebounced("")
     }
 
     private fun handleDelete() {

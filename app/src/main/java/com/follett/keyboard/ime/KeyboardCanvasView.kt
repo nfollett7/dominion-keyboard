@@ -323,7 +323,7 @@ class KeyboardCanvasView @JvmOverloads constructor(
     // ═════════════════════════════════════════════════════════════════════════
 
     // Keys that have long-press actions — character commit is DELAYED for these
-    private val longPressKeys = setOf("SHIFT", "ENTER", "SPACE")
+    private val longPressKeys = setOf("SHIFT", "SPACE")
     // Keys that fire immediately on DOWN (no delay)
     private val immediateKeys = setOf("DELETE", "SPACE", "NUMBERS", "LETTERS", "MIC", "EMOJI", "TRANSLATE")
     private var pendingKeyCommit: Runnable? = null
