@@ -940,6 +940,20 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
         keyRects: List<RectF>,
         keys: List<KeyboardCanvasView.Key>
     ) {
+        // Check if gesture started on the spacebar — if so, it's cursor control
+        if (path.isNotEmpty()) {
+            val startPoint = path.first()
+            val spaceKeyIndex = keys.indexOfFirst { it.tag == "SPACE" }
+            if (spaceKeyIndex >= 0 && spaceKeyIndex < keyRects.size) {
+                val spaceRect = keyRects[spaceKeyIndex]
+                if (spaceRect.contains(startPoint.x, startPoint.y)) {
+                    handleCursorSwipe(path)
+                    return
+                }
+            }
+        }
+
+        // Otherwise it's swipe typing
         val decoder = gestureDecoder ?: return
         val engine = predictiveEngine ?: return
         val density = resources.displayMetrics.density
@@ -947,14 +961,13 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
         if (!decoder.isSwipeGesture(path, density)) return
 
         val candidates = decoder.decode(path, keyRects, keys) { letterSequence ->
-            // Use the predictive engine to find words matching this letter sequence
             engine.getSuggestions(letterSequence, 5)
         }
 
         if (candidates.isNotEmpty()) {
-            // Commit the top candidate
             val ic = currentInputConnection ?: return
             val word = candidates[0]
+            if (isComposing) { ic.finishComposingText(); isComposing = false }
             ic.commitText("$word ", 1)
 
             if (!isPasswordField) {
@@ -964,10 +977,45 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
             }
             currentWordBuffer.clear()
 
-            // Show alternatives in suggestion bar
             suggestion1?.text = candidates.getOrNull(1) ?: ""
             suggestion2?.text = candidates.getOrNull(2) ?: ""
             suggestion3?.text = candidates.getOrNull(3) ?: ""
         }
+    }
+
+    /**
+     * Cursor control: swipe left/right on spacebar to move the text cursor.
+     * GBoard's most-loved hidden feature.
+     */
+    private fun handleCursorSwipe(path: List<PointF>) {
+        if (path.size < 2) return
+        val ic = currentInputConnection ?: return
+
+        // Finish any composing text first
+        if (isComposing) { ic.finishComposingText(); isComposing = false }
+
+        val startX = path.first().x
+        val endX = path.last().x
+        val deltaX = endX - startX
+        val density = resources.displayMetrics.density
+
+        // Calculate how many characters to move (1 char per ~20dp of swipe)
+        val charsMoved = (deltaX / (20f * density)).toInt()
+
+        if (charsMoved > 0) {
+            // Move cursor right
+            for (i in 0 until charsMoved) {
+                ic.sendKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_DPAD_RIGHT))
+                ic.sendKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_DPAD_RIGHT))
+            }
+        } else if (charsMoved < 0) {
+            // Move cursor left
+            for (i in 0 until -charsMoved) {
+                ic.sendKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_DPAD_LEFT))
+                ic.sendKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_DPAD_LEFT))
+            }
+        }
+
+        currentWordBuffer.clear()
     }
 }

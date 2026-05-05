@@ -94,37 +94,47 @@ class PredictiveTextEngine(private val context: Context) {
     }
 
     private fun getEditDistanceMatches(word: String, count: Int): List<String> {
-        // Search the top 10K words for close matches (edit distance <= 2)
-        val matches = mutableListOf<Pair<String, Int>>()  // word, distance
+        val matches = mutableListOf<Triple<String, Int, Int>>()  // word, distance, score
 
-        // Only check words of similar length (±2) for performance
         val minLen = (word.length - 2).coerceAtLeast(2)
         val maxLen = word.length + 2
 
-        for ((dictWord, freq) in builtInFrequency) {
-            if (dictWord.length < minLen || dictWord.length > maxLen) continue
-            if (dictWord == word) continue
+        // Search ALL high-frequency words (top 10K by score) for matches
+        // No early exit — we need the BEST match, not the first match
+        val topWords = builtInFrequency.entries
+            .filter { it.key.length in minLen..maxLen && it.key != word }
+            .sortedByDescending { it.value }
+            .take(10000)  // Check top 10K frequency words
+
+        for ((dictWord, freq) in topWords) {
+            // Quick first-char check: if first char differs AND second char differs, skip
+            // (optimization: most corrections share at least one of the first two chars)
+            if (word.length >= 2 && dictWord.length >= 2) {
+                if (word[0] != dictWord[0] && word[1] != dictWord[1] && word[0] != dictWord[1] && word[1] != dictWord[0]) {
+                    continue
+                }
+            }
 
             val dist = editDistance(word, dictWord)
             if (dist <= 2) {
-                matches.add(dictWord to dist)
+                matches.add(Triple(dictWord, dist, freq))
             }
-
-            // Early exit for performance — stop after checking enough
-            if (matches.size > 20) break
         }
 
         // Also check user-learned words
-        for ((dictWord, _) in userFrequency) {
+        for ((dictWord, userFreq) in userFrequency) {
             if (dictWord.length < minLen || dictWord.length > maxLen) continue
             if (dictWord == word) continue
             val dist = editDistance(word, dictWord)
-            if (dist <= 2) matches.add(dictWord to dist)
+            if (dist <= 2) {
+                matches.add(Triple(dictWord, dist, userFreq * USER_WEIGHT))
+            }
         }
 
-        // Sort by: distance first, then frequency
+        // Sort by: edit distance 1 always beats distance 2,
+        // within same distance, higher frequency wins
         return matches
-            .sortedWith(compareBy({ it.second }, { -(getScore(it.first)) }))
+            .sortedWith(compareBy({ it.second }, { -(it.third) }))
             .take(count)
             .map { it.first }
     }
