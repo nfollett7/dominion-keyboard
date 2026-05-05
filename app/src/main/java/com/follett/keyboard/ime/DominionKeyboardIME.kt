@@ -390,23 +390,20 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
         // AUTOCORRECT (GBoard-style rules):
         // 1. NEVER autocorrect single-character words (a, I, etc.)
         // 2. NEVER autocorrect if the word IS in the dictionary (it's valid)
-        // 3. Only autocorrect if the correction is very close (same length ±1)
+        // 3. Uses edit distance to find corrections for actual typos
         // 4. Only autocorrect words 3+ characters long
         var committedWord = word
         if (isComposing && word.length >= 3 && !isPasswordField) {
             val engine = predictiveEngine
             if (engine != null && !engine.isValidWord(word)) {
-                val suggestions = engine.getSuggestions(word, 1)
-                if (suggestions.isNotEmpty()) {
-                    val corrected = suggestions[0]
-                    // Only correct if same length ±1 (prevents wild corrections)
-                    if (corrected.length in (word.length - 1)..(word.length + 1)
-                        && corrected != word) {
-                        ic.setComposingText(corrected, 1)
-                        committedWord = corrected
-                        originalWordBeforeSuggestion = word
-                        lastCommittedSuggestion = corrected
-                    }
+                // Use edit-distance matching for real typo correction
+                val corrections = engine.getAutocorrectCandidates(word, 1)
+                if (corrections.isNotEmpty()) {
+                    val corrected = corrections[0]
+                    ic.setComposingText(corrected, 1)
+                    committedWord = corrected
+                    originalWordBeforeSuggestion = word
+                    lastCommittedSuggestion = corrected
                 }
             }
             ic.finishComposingText()

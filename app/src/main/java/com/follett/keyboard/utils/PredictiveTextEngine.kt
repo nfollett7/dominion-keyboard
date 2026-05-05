@@ -59,20 +59,107 @@ class PredictiveTextEngine(private val context: Context) {
         val lower = prefix.lowercase().trim()
         val candidates = mutableListOf<String>()
 
-        // Prefix lookup via TreeMap subMap
+        // 1. Prefix matches (fast, for completions while typing)
         val subMap = prefixIndex.subMap(lower, "$lower\uFFFF")
         for ((_, words) in subMap) {
             candidates.addAll(words)
             if (candidates.size > 50) break
         }
 
-        return candidates
+        val prefixResults = candidates
             .asSequence()
             .distinct()
-            .filter { it.startsWith(lower) && it != lower && it.length > lower.length }
+            .filter { it.startsWith(lower) && it != lower }
             .sortedByDescending { getScore(it) }
             .take(count)
             .toList()
+
+        // If we have good prefix matches, return them
+        if (prefixResults.isNotEmpty()) return prefixResults
+
+        // 2. Fuzzy/edit-distance matches (for autocorrect of typos)
+        return getEditDistanceMatches(lower, count)
+    }
+
+    /**
+     * Get autocorrect candidates for a misspelled word.
+     * Finds dictionary words within edit distance 1-2 of the input.
+     * Used when no prefix match is found (likely a typo).
+     */
+    fun getAutocorrectCandidates(word: String, count: Int = 3): List<String> {
+        if (!isLoaded) return emptyList()
+        val lower = word.lowercase().trim()
+        if (lower.length < 3) return emptyList()
+        return getEditDistanceMatches(lower, count)
+    }
+
+    private fun getEditDistanceMatches(word: String, count: Int): List<String> {
+        // Search the top 10K words for close matches (edit distance <= 2)
+        val matches = mutableListOf<Pair<String, Int>>()  // word, distance
+
+        // Only check words of similar length (±2) for performance
+        val minLen = (word.length - 2).coerceAtLeast(2)
+        val maxLen = word.length + 2
+
+        for ((dictWord, freq) in builtInFrequency) {
+            if (dictWord.length < minLen || dictWord.length > maxLen) continue
+            if (dictWord == word) continue
+
+            val dist = editDistance(word, dictWord)
+            if (dist <= 2) {
+                matches.add(dictWord to dist)
+            }
+
+            // Early exit for performance — stop after checking enough
+            if (matches.size > 20) break
+        }
+
+        // Also check user-learned words
+        for ((dictWord, _) in userFrequency) {
+            if (dictWord.length < minLen || dictWord.length > maxLen) continue
+            if (dictWord == word) continue
+            val dist = editDistance(word, dictWord)
+            if (dist <= 2) matches.add(dictWord to dist)
+        }
+
+        // Sort by: distance first, then frequency
+        return matches
+            .sortedWith(compareBy({ it.second }, { -(getScore(it.first)) }))
+            .take(count)
+            .map { it.first }
+    }
+
+    /**
+     * Levenshtein edit distance between two strings.
+     * Optimized with early termination for keyboard use.
+     */
+    private fun editDistance(a: String, b: String): Int {
+        if (a == b) return 0
+        if (a.isEmpty()) return b.length
+        if (b.isEmpty()) return a.length
+
+        // Quick check: if length difference > 2, skip
+        if (kotlin.math.abs(a.length - b.length) > 2) return 3
+
+        val dp = Array(a.length + 1) { IntArray(b.length + 1) }
+        for (i in 0..a.length) dp[i][0] = i
+        for (j in 0..b.length) dp[0][j] = j
+
+        for (i in 1..a.length) {
+            for (j in 1..b.length) {
+                val cost = if (a[i - 1] == b[j - 1]) 0 else 1
+                dp[i][j] = minOf(
+                    dp[i - 1][j] + 1,      // deletion
+                    dp[i][j - 1] + 1,      // insertion
+                    dp[i - 1][j - 1] + cost // substitution
+                )
+                // Transposition (adjacent swap) — common typo
+                if (i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1]) {
+                    dp[i][j] = minOf(dp[i][j], dp[i - 2][j - 2] + cost)
+                }
+            }
+        }
+        return dp[a.length][b.length]
     }
 
     fun learnWord(word: String) {
