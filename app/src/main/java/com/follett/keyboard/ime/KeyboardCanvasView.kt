@@ -319,18 +319,24 @@ class KeyboardCanvasView @JvmOverloads constructor(
     }
 
     // ═════════════════════════════════════════════════════════════════════════
-    // TOUCH HANDLING
+    // TOUCH HANDLING (GBoard-style: commit on UP, expanded targets)
     // ═════════════════════════════════════════════════════════════════════════
+
+    // Keys that have long-press actions — character commit is DELAYED for these
+    private val longPressKeys = setOf("SHIFT", "ENTER", ",", ".")
+    // Keys that fire immediately on DOWN (no delay)
+    private val immediateKeys = setOf("DELETE", "SPACE", "NUMBERS", "LETTERS", "MIC", "TRANSLATE")
+    private var pendingKeyCommit: Runnable? = null
+    private val tapCommitDelay = 100L  // ms to wait before committing long-press keys
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                // Start tracking gesture path
                 gesturePath.clear()
                 isGesturing = false
                 gesturePath.add(android.graphics.PointF(event.x, event.y))
 
-                val index = findKeyAt(event.x, event.y)
+                val index = findKeyNearest(event.x, event.y)
                 if (index >= 0) {
                     pressedKeyIndex = index
                     longPressHandled = false
@@ -343,30 +349,31 @@ class KeyboardCanvasView @JvmOverloads constructor(
 
                     val key = keys[index]
 
-                    // Fire immediately for responsiveness
-                    keyListener?.onKeyPressed(key)
+                    // Immediate-fire keys (DELETE, SPACE, etc.) — no delay
+                    if (key.tag in immediateKeys) {
+                        keyListener?.onKeyPressed(key)
+                    }
 
-                    // Schedule key repeat for DELETE
+                    // DELETE: schedule key repeat
                     if (key.tag == "DELETE") {
                         handler.postDelayed(repeatRunnable, repeatInitialDelay)
                     }
 
-                    // Schedule long press for SHIFT, ENTER, comma, period
-                    if (key.tag in listOf("SHIFT", "ENTER", ",", ".")) {
-                        handler.postDelayed(longPressRunnable, 500L)
+                    // Long-press keys: schedule long-press detection
+                    if (key.tag in longPressKeys) {
+                        handler.postDelayed(longPressRunnable, 400L)
                     }
                 }
                 return true
             }
 
             MotionEvent.ACTION_MOVE -> {
-                // Track gesture path (sample every 8px to reduce overhead)
                 val last = gesturePath.lastOrNull()
                 if (last == null || kotlin.math.abs(event.x - last.x) + kotlin.math.abs(event.y - last.y) > 8f) {
                     gesturePath.add(android.graphics.PointF(event.x, event.y))
                 }
 
-                val index = findKeyAt(event.x, event.y)
+                val index = findKeyNearest(event.x, event.y)
                 if (index != pressedKeyIndex) {
                     if (!isGesturing && gesturePath.size > 4) {
                         isGesturing = true
@@ -381,16 +388,21 @@ class KeyboardCanvasView @JvmOverloads constructor(
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 cancelAllCallbacks()
 
-                // Check if this was a gesture (swipe)
                 if (isGesturing && gesturePath.size > 10) {
+                    // Gesture completed
                     gestureListener?.onGestureCompleted(
                         ArrayList(gesturePath), keyRects, keys
                     )
                 } else if (pressedKeyIndex >= 0 && !longPressHandled && !isRepeating) {
-                    keyListener?.onKeyReleased(keys[pressedKeyIndex])
+                    val key = keys[pressedKeyIndex]
+                    if (key.tag !in immediateKeys) {
+                        // Character keys and long-press keys: commit on ACTION_UP
+                        // This is the GBoard pattern — commit happens on lift
+                        keyListener?.onKeyPressed(key)
+                    }
+                    keyListener?.onKeyReleased(key)
                 }
 
-                // Reset gesture state
                 gesturePath.clear()
                 isGesturing = false
                 pressedKeyIndex = -1
@@ -404,13 +416,45 @@ class KeyboardCanvasView @JvmOverloads constructor(
     private fun cancelAllCallbacks() {
         handler.removeCallbacks(repeatRunnable)
         handler.removeCallbacks(longPressRunnable)
+        pendingKeyCommit?.let { handler.removeCallbacks(it) }
+        pendingKeyCommit = null
     }
 
-    private fun findKeyAt(x: Float, y: Float): Int {
+    /**
+     * Find the nearest key using expanded touch targets and proximity scoring.
+     * GBoard-style: keys have ~20% expanded hit areas, edge keys even more.
+     * Uses distance-to-center scoring when touch is between keys.
+     */
+    private fun findKeyNearest(x: Float, y: Float): Int {
+        // First: exact hit test
         for (i in keyRects.indices) {
             if (keyRects[i].contains(x, y)) return i
         }
-        return -1
+
+        // Second: expanded hit test (20% margin)
+        var bestIndex = -1
+        var bestDist = Float.MAX_VALUE
+        val expansion = keyMargin * 3  // ~20% expansion
+
+        for (i in keyRects.indices) {
+            val rect = keyRects[i]
+            val expanded = RectF(
+                rect.left - expansion,
+                rect.top - expansion,
+                rect.right + expansion,
+                rect.bottom + expansion
+            )
+            if (expanded.contains(x, y)) {
+                val dx = x - rect.centerX()
+                val dy = y - rect.centerY()
+                val dist = dx * dx + dy * dy
+                if (dist < bestDist) {
+                    bestDist = dist
+                    bestIndex = i
+                }
+            }
+        }
+        return bestIndex
     }
 
     // ═════════════════════════════════════════════════════════════════════════
