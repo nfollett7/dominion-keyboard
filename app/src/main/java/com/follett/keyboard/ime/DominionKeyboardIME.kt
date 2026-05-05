@@ -473,6 +473,13 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
             val ic = currentInputConnection ?: return@launch
             val client = openAIClient ?: return@launch
 
+            // Check cost warning
+            if (prefsManager.shouldShowCostWarning()) {
+                showStatus("⚠️ Daily API cost exceeded $1. Autocorrect paused.")
+                prefsManager.markCostWarningShown()
+                return@launch
+            }
+
             // Get the text the user has typed in this session
             val currentText = ic.getTextBeforeCursor(500, 0)?.toString() ?: return@launch
             if (currentText.length < 10) return@launch
@@ -480,6 +487,9 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
             val corrected = withContext(Dispatchers.IO) {
                 client.correctWithContext(currentText)
             }
+
+            // Track cost (~170 tokens per call: 100 system + 50 input + 50 output)
+            prefsManager.addApiCost(170)
 
             // Only replace if GPT actually changed something
             if (corrected != null && corrected != currentText && corrected.isNotBlank()) {

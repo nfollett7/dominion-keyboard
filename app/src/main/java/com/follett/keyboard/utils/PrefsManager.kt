@@ -77,7 +77,48 @@ class PrefsManager(context: Context) {
         putLong(KEY_TOTAL_WORDS, getTotalWords() + 1)
     }
 
-    // ─── Clear ────────────────────────────────────────────────────────────────
+    // ─── API Cost Tracking ────────────────────────────────────────────────────────
+
+    private val KEY_DAILY_COST = "daily_api_cost"
+    private val KEY_COST_DATE = "cost_tracking_date"
+    private val KEY_COST_WARNING_SHOWN = "cost_warning_shown"
+
+    fun addApiCost(estimatedTokens: Int) {
+        val today = java.time.LocalDate.now().toString()
+        val storedDate = prefs.getString(KEY_COST_DATE, "") ?: ""
+
+        // Reset if new day
+        if (storedDate != today) {
+            prefs.edit {
+                putString(KEY_COST_DATE, today)
+                putFloat(KEY_DAILY_COST, 0f)
+                putBoolean(KEY_COST_WARNING_SHOWN, false)
+            }
+        }
+
+        // GPT-4o-mini: ~$0.00002 per typical autocorrect call (~170 tokens)
+        val costPerToken = 0.00000015f  // $0.15 per 1M input tokens (rough average)
+        val cost = estimatedTokens * costPerToken
+        val currentCost = prefs.getFloat(KEY_DAILY_COST, 0f)
+        prefs.edit { putFloat(KEY_DAILY_COST, currentCost + cost) }
+    }
+
+    fun getDailyCost(): Float {
+        val today = java.time.LocalDate.now().toString()
+        val storedDate = prefs.getString(KEY_COST_DATE, "") ?: ""
+        if (storedDate != today) return 0f
+        return prefs.getFloat(KEY_DAILY_COST, 0f)
+    }
+
+    fun shouldShowCostWarning(): Boolean {
+        return getDailyCost() >= 1.0f && !prefs.getBoolean(KEY_COST_WARNING_SHOWN, false)
+    }
+
+    fun markCostWarningShown() {
+        prefs.edit { putBoolean(KEY_COST_WARNING_SHOWN, true) }
+    }
+
+    // ─── Clear ────────────────────────────────────────────────────────────────────────
 
     fun clearAll() = prefs.edit { clear() }
 }
