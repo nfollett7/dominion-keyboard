@@ -480,21 +480,22 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
                 return@launch
             }
 
-            // Get the text the user has typed in this session
-            val currentText = ic.getTextBeforeCursor(500, 0)?.toString() ?: return@launch
-            if (currentText.length < 10) return@launch
+            // ONLY correct what the user typed (sentenceBuffer), NOT pasted text
+            val typedText = sentenceBuffer.toString().trim()
+            if (typedText.length < 10) return@launch
 
             val corrected = withContext(Dispatchers.IO) {
-                client.correctWithContext(currentText)
+                client.correctWithContext(typedText)
             }
 
             // Track cost (~170 tokens per call: 100 system + 50 input + 50 output)
             prefsManager.addApiCost(170)
 
             // Only replace if GPT actually changed something
-            if (corrected != null && corrected != currentText && corrected.isNotBlank()) {
+            if (corrected != null && corrected != typedText && corrected.isNotBlank()) {
+                // Replace only the portion the user typed (end of text field)
                 ic.beginBatchEdit()
-                ic.deleteSurroundingText(currentText.length, 0)
+                ic.deleteSurroundingText(typedText.length, 0)
                 ic.commitText(corrected, 1)
                 ic.endBatchEdit()
             }
