@@ -290,6 +290,7 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
     override fun onKeyLongPressed(key: KeyboardCanvasView.Key): Boolean {
         return when (key.tag) {
             "SHIFT" -> { toggleCapsLock(); true }
+            "ENTER" -> { performEnterAction(); true }
             else -> false
         }
     }
@@ -398,15 +399,10 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
     }
 
     private fun handleEnter() {
+        // Tap Enter = ALWAYS newline (user preference)
         val ic = currentInputConnection ?: return
         if (isComposing) { ic.finishComposingText(); isComposing = false }
-
-        val imeAction = currentInputEditorInfo?.imeOptions?.and(EditorInfo.IME_MASK_ACTION)
-        if (imeAction != null && imeAction != EditorInfo.IME_ACTION_NONE) {
-            ic.performEditorAction(imeAction)
-        } else {
-            ic.commitText("\n", 1)
-        }
+        ic.commitText("\n", 1)
 
         if (!isPasswordField) queueLog("\n", "enter")
         currentWordBuffer.clear()
@@ -417,6 +413,28 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
             isShifted = true
             keyboardCanvas?.setShiftState(true, false)
         }
+        if (!isPasswordField) updateSuggestionsDebounced("")
+    }
+
+    /**
+     * Long-press Enter = execute the app's IME action (Send, Search, Go, etc.)
+     * This allows the user to send messages without reaching for the app's button.
+     */
+    private fun performEnterAction() {
+        val ic = currentInputConnection ?: return
+        if (isComposing) { ic.finishComposingText(); isComposing = false }
+
+        val imeAction = currentInputEditorInfo?.imeOptions?.and(EditorInfo.IME_MASK_ACTION)
+        if (imeAction != null && imeAction != EditorInfo.IME_ACTION_NONE) {
+            ic.performEditorAction(imeAction)
+        } else {
+            // No app action defined — just insert newline
+            ic.commitText("\n", 1)
+        }
+
+        if (!isPasswordField) queueLog("\n", "enter_action")
+        currentWordBuffer.clear()
+        sentenceBuffer.clear()
         if (!isPasswordField) updateSuggestionsDebounced("")
     }
 
