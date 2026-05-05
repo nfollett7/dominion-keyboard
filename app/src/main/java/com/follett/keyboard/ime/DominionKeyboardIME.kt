@@ -75,8 +75,10 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
     private var aiPredictionJob: Job? = null
     private var statusHideJob: Job? = null
 
-    // ─── Composing ───────────────────────────────────────────────────────────
+    // ─── Composing & Undo ─────────────────────────────────────────────────────
     private var isComposing = false
+    private var lastCommittedSuggestion: String? = null  // For undo-autocorrect
+    private var originalWordBeforeSuggestion: String? = null  // What user actually typed
 
     // ─── Dependencies ────────────────────────────────────────────────────────
     private var db: KeyboardDatabase? = null
@@ -150,6 +152,8 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
                 LinearLayout.LayoutParams.WRAP_CONTENT
             )
             keyListener = this@DominionKeyboardIME
+            soundEnabled = prefsManager.isSoundEnabled()
+            isHapticFeedbackEnabled = prefsManager.isHapticEnabled()
             setKeyboard(KeyboardCanvasView.createQwertyLayout())
         }
         rootView!!.addView(keyboardCanvas)
@@ -319,6 +323,10 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
         val ic = currentInputConnection ?: return
         val output = if (isShifted || isCapsLock) char.uppercase() else char.lowercase()
 
+        // Clear undo state — user moved on
+        lastCommittedSuggestion = null
+        originalWordBeforeSuggestion = null
+
         currentWordBuffer.append(output)
         ic.setComposingText(currentWordBuffer.toString(), 1)
         isComposing = true
@@ -440,6 +448,29 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
 
     private fun handleDelete() {
         val ic = currentInputConnection ?: return
+
+        // Undo last autocorrect: if user hits backspace right after accepting a suggestion,
+        // revert to what they originally typed
+        if (lastCommittedSuggestion != null && originalWordBeforeSuggestion != null) {
+            val suggestion = lastCommittedSuggestion!!
+            val original = originalWordBeforeSuggestion!!
+            // Delete the suggestion + trailing space
+            ic.deleteSurroundingText(suggestion.length + 1, 0)
+            // Re-insert original as composing text
+            currentWordBuffer.clear()
+            currentWordBuffer.append(original)
+            ic.setComposingText(original, 1)
+            isComposing = true
+            lastCommittedSuggestion = null
+            originalWordBeforeSuggestion = null
+            if (!isPasswordField) updateSuggestionsDebounced(original)
+            return
+        }
+
+        // Normal delete behavior
+        lastCommittedSuggestion = null
+        originalWordBeforeSuggestion = null
+
         if (isComposing && currentWordBuffer.isNotEmpty()) {
             currentWordBuffer.deleteCharAt(currentWordBuffer.length - 1)
             if (currentWordBuffer.isEmpty()) {
@@ -540,6 +571,9 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
         if (word.isNullOrBlank()) return
         val ic = currentInputConnection ?: return
 
+        // Save for undo
+        originalWordBeforeSuggestion = currentWordBuffer.toString()
+
         if (isComposing) {
             ic.setComposingText(word, 1)
             ic.finishComposingText()
@@ -551,6 +585,8 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
             ic.commitText(word, 1)
         }
         ic.commitText(" ", 1)
+
+        lastCommittedSuggestion = word
 
         if (!isPasswordField) {
             queueLog(word, "word_complete")

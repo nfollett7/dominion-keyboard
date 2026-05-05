@@ -7,6 +7,7 @@ import android.graphics.RectF
 import android.os.Handler
 import android.os.Looper
 import android.util.AttributeSet
+import android.media.AudioManager
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
@@ -41,6 +42,16 @@ class KeyboardCanvasView @JvmOverloads constructor(
     }
 
     var keyListener: KeyListener? = null
+    var soundEnabled: Boolean = false
+    private var audioManager: AudioManager? = null
+
+    private fun playKeySound() {
+        if (!soundEnabled) return
+        if (audioManager == null) {
+            audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+        }
+        audioManager?.playSoundEffect(AudioManager.FX_KEYPRESS_STANDARD, -1f)
+    }
 
     // ─── Key Data Model ──────────────────────────────────────────────────────
     data class Key(
@@ -298,6 +309,7 @@ class KeyboardCanvasView @JvmOverloads constructor(
                     invalidate()
 
                     performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    playKeySound()
 
                     val key = keys[index]
 
@@ -363,6 +375,46 @@ class KeyboardCanvasView @JvmOverloads constructor(
     )
 
     companion object {
+        fun createQwertyWithNumberRow(): KeyboardLayout {
+            val keys = mutableListOf<Key>()
+
+            // Row 0: Number row 1-0
+            val nums = "1234567890"
+            for (i in nums.indices) {
+                keys.add(Key(nums[i].toString(), nums[i].toString(), 0, i.toFloat(), 1f))
+            }
+
+            // Row 1: Q W E R T Y U I O P
+            val row1 = "qwertyuiop"
+            for (i in row1.indices) {
+                keys.add(Key(row1[i].toString(), row1[i].toString(), 1, i.toFloat(), 1f))
+            }
+
+            // Row 2: A S D F G H J K L
+            val row2 = "asdfghjkl"
+            for (i in row2.indices) {
+                keys.add(Key(row2[i].toString(), row2[i].toString(), 2, i.toFloat() + 0.5f, 1f))
+            }
+
+            // Row 3: SHIFT Z X C V B N M DELETE
+            keys.add(Key("⇧", "SHIFT", 3, 0f, 1.5f, KeyStyle.SPECIAL))
+            val row3 = "zxcvbnm"
+            for (i in row3.indices) {
+                keys.add(Key(row3[i].toString(), row3[i].toString(), 3, 1.5f + i, 1f))
+            }
+            keys.add(Key("⌫", "DELETE", 3, 8.5f, 1.5f, KeyStyle.ACTION))
+
+            // Row 4: ?123 | , | 🎤 | SPACE | . | ↵
+            keys.add(Key("?123", "NUMBERS", 4, 0f, 1.5f, KeyStyle.SPECIAL))
+            keys.add(Key(",", ",", 4, 1.5f, 1f))
+            keys.add(Key("🎤", "MIC", 4, 2.5f, 1f, KeyStyle.MIC))
+            keys.add(Key("", "SPACE", 4, 3.5f, 4f))
+            keys.add(Key(".", ".", 4, 7.5f, 1f))
+            keys.add(Key("↵", "ENTER", 4, 8.5f, 1.5f, KeyStyle.ACTION))
+
+            return KeyboardLayout(keys, 5, 10f)
+        }
+
         fun createQwertyLayout(): KeyboardLayout {
             val keys = mutableListOf<Key>()
 
