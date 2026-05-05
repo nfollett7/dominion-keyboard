@@ -4,30 +4,34 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import com.follett.keyboard.data.model.InputCapture
 import com.follett.keyboard.data.model.KeystrokeLog
 import com.follett.keyboard.data.model.SessionLog
 
 /**
- * KeyboardDatabase — Room database for all keyboard input logging.
+ * KeyboardDatabase — Room database for all keyboard data.
  *
  * Stores:
  *  - SessionLog: Each keyboard session (open/close events)
- *  - KeystrokeLog: Every individual key press, word, dictation, translation
+ *  - KeystrokeLog: Individual key presses (legacy, being phased out)
+ *  - InputCapture: Full message captures for the digital twin
  *
  * Uses a singleton pattern to prevent multiple database instances.
  */
 @Database(
     entities = [
         SessionLog::class,
-        KeystrokeLog::class
+        KeystrokeLog::class,
+        InputCapture::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class KeyboardDatabase : RoomDatabase() {
 
     abstract fun sessionLogDao(): SessionLogDao
     abstract fun keystrokeLogDao(): KeystrokeLogDao
+    abstract fun inputCaptureDao(): InputCaptureDao
 
     companion object {
         private const val DATABASE_NAME = "dominion_keyboard.db"
