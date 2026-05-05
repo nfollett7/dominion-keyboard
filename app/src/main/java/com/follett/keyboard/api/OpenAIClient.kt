@@ -41,11 +41,20 @@ class OpenAIClient(private val context: Context) {
 
     private val prefs = PrefsManager(context)
 
+    // Fast client for chat completions (predictions, translation)
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(25, TimeUnit.SECONDS)
-        .writeTimeout(25, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
+        .writeTimeout(20, TimeUnit.SECONDS)
         .retryOnConnectionFailure(false)
+        .build()
+
+    // Longer timeout client for Whisper (audio upload can be slow)
+    private val whisperClient = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .writeTimeout(60, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
         .build()
 
     // Track active calls for cancellation
@@ -73,11 +82,15 @@ class OpenAIClient(private val context: Context) {
                 .post(requestBody)
                 .build()
 
-            val response = httpClient.newCall(request).execute()
+            val response = whisperClient.newCall(request).execute()
             if (response.isSuccessful) {
-                response.body?.string()?.trim()
+                val result = response.body?.string()?.trim()
+                response.close()
+                result
             } else {
-                Log.e(TAG, "Whisper error ${response.code}: ${response.body?.string()}")
+                val errorBody = response.body?.string()
+                response.close()
+                Log.e(TAG, "Whisper error ${response.code}: $errorBody")
                 null
             }
         } catch (e: Exception) {

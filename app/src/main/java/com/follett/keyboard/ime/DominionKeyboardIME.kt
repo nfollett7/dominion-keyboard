@@ -387,7 +387,27 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
             }
         }
 
-        if (isComposing) {
+        // AUTOCORRECT: If word isn't in dictionary, replace with top suggestion
+        var committedWord = word
+        if (isComposing && word.isNotEmpty() && !isPasswordField) {
+            val engine = predictiveEngine
+            if (engine != null && !engine.isValidWord(word)) {
+                val suggestions = engine.getSuggestions(word, 1)
+                if (suggestions.isNotEmpty()) {
+                    val corrected = suggestions[0]
+                    // Only autocorrect if the suggestion is close to what was typed
+                    if (corrected.length in (word.length - 2)..(word.length + 2)) {
+                        ic.setComposingText(corrected, 1)
+                        committedWord = corrected
+                        // Save for undo
+                        originalWordBeforeSuggestion = word
+                        lastCommittedSuggestion = corrected
+                    }
+                }
+            }
+            ic.finishComposingText()
+            isComposing = false
+        } else if (isComposing) {
             ic.finishComposingText()
             isComposing = false
         }
@@ -395,10 +415,10 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
 
         if (!isPasswordField) {
             queueLog(" ", "space")
-            if (word.isNotEmpty()) {
-                queueLog(word, "word_complete")
-                predictiveEngine?.learnWord(word)
-                appendToSentenceBuffer(word + " ")
+            if (committedWord.isNotEmpty()) {
+                queueLog(committedWord, "word_complete")
+                predictiveEngine?.learnWord(committedWord)
+                appendToSentenceBuffer(committedWord + " ")
             }
             updateSuggestionsDebounced("")
         }

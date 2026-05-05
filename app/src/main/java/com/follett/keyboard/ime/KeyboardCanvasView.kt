@@ -360,15 +360,17 @@ class KeyboardCanvasView @JvmOverloads constructor(
             }
 
             MotionEvent.ACTION_MOVE -> {
-                // Track gesture path
-                gesturePath.add(android.graphics.PointF(event.x, event.y))
+                // Track gesture path (sample every 8px to reduce overhead)
+                val last = gesturePath.lastOrNull()
+                if (last == null || kotlin.math.abs(event.x - last.x) + kotlin.math.abs(event.y - last.y) > 8f) {
+                    gesturePath.add(android.graphics.PointF(event.x, event.y))
+                }
 
                 val index = findKeyAt(event.x, event.y)
                 if (index != pressedKeyIndex) {
-                    // Finger moved to a different key — this might be a swipe
-                    if (!isGesturing && gesturePath.size > 5) {
+                    if (!isGesturing && gesturePath.size > 4) {
                         isGesturing = true
-                        cancelAllCallbacks()  // Cancel tap/repeat behaviors
+                        cancelAllCallbacks()
                     }
                     pressedKeyIndex = index
                     invalidate()

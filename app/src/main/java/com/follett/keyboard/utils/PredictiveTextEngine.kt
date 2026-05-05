@@ -150,11 +150,12 @@ class PredictiveTextEngine(private val context: Context) {
     }
 
     private fun addWordToIndex(word: String) {
-        val maxLen = minOf(word.length, 6)
+        // Index up to 4 chars deep (covers most prefix lookups)
+        val maxLen = minOf(word.length, 4)
         for (len in 1..maxLen) {
             val prefix = word.substring(0, len)
             prefixIndex.getOrPut(prefix) { mutableListOf() }.let { list ->
-                if (!list.contains(word)) list.add(word)
+                if (list.size < 30 && !list.contains(word)) list.add(word)
             }
         }
     }
