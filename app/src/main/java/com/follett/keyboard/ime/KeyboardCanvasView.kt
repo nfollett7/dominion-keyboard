@@ -76,6 +76,15 @@ class KeyboardCanvasView @JvmOverloads constructor(
     private var pressedKeyIndex = -1
     private val handler = Handler(Looper.getMainLooper())
 
+    // ─── Gesture Path Tracking ─────────────────────────────────────────────
+    private val gesturePath = mutableListOf<android.graphics.PointF>()
+    private var isGesturing = false
+
+    interface GestureListener {
+        fun onGestureCompleted(path: List<android.graphics.PointF>, keyRects: List<RectF>, keys: List<Key>)
+    }
+    var gestureListener: GestureListener? = null
+
     // ─── Key Repeat (DELETE) ─────────────────────────────────────────────────
     private var isRepeating = false
     private var repeatCount = 0
@@ -178,6 +187,24 @@ class KeyboardCanvasView @JvmOverloads constructor(
     fun setShiftState(shifted: Boolean, capsLock: Boolean) {
         isShifted = shifted
         isCapsLock = capsLock
+        invalidate()
+    }
+
+    /**
+     * Apply a theme to all paint objects. Call before first draw.
+     */
+    fun applyTheme(theme: KeyboardTheme) {
+        paintBg.color = theme.bgColor
+        paintKeyNormal.color = theme.keyNormal
+        paintKeySpecial.color = theme.keySpecial
+        paintKeyAction.color = theme.keyAction
+        paintKeyMic.color = theme.keyMic
+        paintKeyPressed.color = theme.keyPressed
+        paintBorder.color = theme.keyBorder
+        paintBorderAction.color = theme.keyBorderAction
+        paintText.color = theme.textNormal
+        paintTextAction.color = theme.textAction
+        paintTextSpecial.color = theme.textSpecial
         invalidate()
     }
 
@@ -298,6 +325,11 @@ class KeyboardCanvasView @JvmOverloads constructor(
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                // Start tracking gesture path
+                gesturePath.clear()
+                isGesturing = false
+                gesturePath.add(android.graphics.PointF(event.x, event.y))
+
                 val index = findKeyAt(event.x, event.y)
                 if (index >= 0) {
                     pressedKeyIndex = index
@@ -328,9 +360,16 @@ class KeyboardCanvasView @JvmOverloads constructor(
             }
 
             MotionEvent.ACTION_MOVE -> {
+                // Track gesture path
+                gesturePath.add(android.graphics.PointF(event.x, event.y))
+
                 val index = findKeyAt(event.x, event.y)
                 if (index != pressedKeyIndex) {
-                    cancelAllCallbacks()
+                    // Finger moved to a different key — this might be a swipe
+                    if (!isGesturing && gesturePath.size > 5) {
+                        isGesturing = true
+                        cancelAllCallbacks()  // Cancel tap/repeat behaviors
+                    }
                     pressedKeyIndex = index
                     invalidate()
                 }
@@ -339,9 +378,19 @@ class KeyboardCanvasView @JvmOverloads constructor(
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 cancelAllCallbacks()
-                if (pressedKeyIndex >= 0 && !longPressHandled && !isRepeating) {
+
+                // Check if this was a gesture (swipe)
+                if (isGesturing && gesturePath.size > 10) {
+                    gestureListener?.onGestureCompleted(
+                        ArrayList(gesturePath), keyRects, keys
+                    )
+                } else if (pressedKeyIndex >= 0 && !longPressHandled && !isRepeating) {
                     keyListener?.onKeyReleased(keys[pressedKeyIndex])
                 }
+
+                // Reset gesture state
+                gesturePath.clear()
+                isGesturing = false
                 pressedKeyIndex = -1
                 invalidate()
                 return true

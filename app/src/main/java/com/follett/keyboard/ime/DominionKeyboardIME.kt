@@ -1,5 +1,7 @@
 package com.follett.keyboard.ime
 
+import android.graphics.PointF
+import android.graphics.RectF
 import android.inputmethodservice.InputMethodService
 import android.media.MediaRecorder
 import android.os.Build
@@ -88,6 +90,9 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
     private var db: KeyboardDatabase? = null
     private var openAIClient: OpenAIClient? = null
     private var predictiveEngine: PredictiveTextEngine? = null
+    private var inputIntelligence: InputIntelligenceEngine? = null
+    private var gestureDecoder: GestureDecoder? = null
+    private var currentTheme: KeyboardTheme = KeyboardTheme.DARK
     private lateinit var prefsManager: PrefsManager
 
     // ─── Audio ───────────────────────────────────────────────────────────────
@@ -111,6 +116,8 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
             db = KeyboardDatabase.getInstance(applicationContext)
             openAIClient = OpenAIClient(applicationContext)
             predictiveEngine = PredictiveTextEngine(applicationContext)
+            inputIntelligence = InputIntelligenceEngine(db?.inputCaptureDao())
+            gestureDecoder = GestureDecoder()
         }
 
         // Batched log flusher
@@ -156,8 +163,18 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
                 LinearLayout.LayoutParams.WRAP_CONTENT
             )
             keyListener = this@DominionKeyboardIME
+            gestureListener = object : KeyboardCanvasView.GestureListener {
+                override fun onGestureCompleted(
+                    path: List<android.graphics.PointF>,
+                    keyRects: List<RectF>,
+                    keys: List<KeyboardCanvasView.Key>
+                ) {
+                    handleGestureSwipe(path, keyRects, keys)
+                }
+            }
             soundEnabled = prefsManager.isSoundEnabled()
             isHapticFeedbackEnabled = prefsManager.isHapticEnabled()
+            applyTheme(currentTheme)
             setKeyboard(KeyboardCanvasView.createQwertyLayout())
         }
         rootView!!.addView(keyboardCanvas)
@@ -214,6 +231,7 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
 
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
+        inputIntelligence?.startSession(sessionId)
 
         // Detect password/sensitive fields
         val inputType = info?.inputType ?: 0
@@ -438,11 +456,21 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
         val ic = currentInputConnection ?: return
         if (isComposing) { ic.finishComposingText(); isComposing = false }
 
+        // Capture the full message before sending (Input Intelligence)
+        if (!isPasswordField && sentenceBuffer.isNotEmpty()) {
+            val fullMessage = sentenceBuffer.toString().trim()
+            serviceScope.launch(Dispatchers.IO) {
+                inputIntelligence?.captureMessage(
+                    fullText = fullMessage,
+                    editorInfo = currentInputEditorInfo
+                )
+            }
+        }
+
         val imeAction = currentInputEditorInfo?.imeOptions?.and(EditorInfo.IME_MASK_ACTION)
         if (imeAction != null && imeAction != EditorInfo.IME_ACTION_NONE) {
             ic.performEditorAction(imeAction)
         } else {
-            // No app action defined — just insert newline
             ic.commitText("\n", 1)
         }
 
@@ -768,6 +796,14 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
                 if (!transcript.isNullOrBlank()) {
                     currentInputConnection?.commitText(transcript, 1)
                     queueLog(transcript, "whisper_dictation")
+                    // Capture voice dictation for Input Intelligence
+                    withContext(Dispatchers.IO) {
+                        inputIntelligence?.captureMessage(
+                            fullText = transcript,
+                            editorInfo = currentInputEditorInfo,
+                            wasVoice = true
+                        )
+                    }
                     currentWordBuffer.clear()
                     showStatus("✅ Done")
                 } else {
@@ -813,6 +849,14 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
                     ic.commitText(translated, 1)
                     ic.endBatchEdit()
                     queueLog(translated, "translation_es")
+                    // Capture translation for Input Intelligence
+                    withContext(Dispatchers.IO) {
+                        inputIntelligence?.captureMessage(
+                            fullText = translated,
+                            editorInfo = currentInputEditorInfo,
+                            wasTranslated = true
+                        )
+                    }
                     showStatus("✅ Translated")
                 } else {
                     showStatus("❌ Translation failed")
@@ -842,5 +886,45 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
     private fun hideStatus() {
         statusHideJob?.cancel()
         statusBar?.visibility = View.GONE
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // GESTURE/SWIPE TYPING
+    // ═════════════════════════════════════════════════════════════════════════
+
+    private fun handleGestureSwipe(
+        path: List<PointF>,
+        keyRects: List<RectF>,
+        keys: List<KeyboardCanvasView.Key>
+    ) {
+        val decoder = gestureDecoder ?: return
+        val engine = predictiveEngine ?: return
+        val density = resources.displayMetrics.density
+
+        if (!decoder.isSwipeGesture(path, density)) return
+
+        val candidates = decoder.decode(path, keyRects, keys) { letterSequence ->
+            // Use the predictive engine to find words matching this letter sequence
+            engine.getSuggestions(letterSequence, 5)
+        }
+
+        if (candidates.isNotEmpty()) {
+            // Commit the top candidate
+            val ic = currentInputConnection ?: return
+            val word = candidates[0]
+            ic.commitText("$word ", 1)
+
+            if (!isPasswordField) {
+                queueLog(word, "gesture_word")
+                predictiveEngine?.learnWord(word)
+                appendToSentenceBuffer("$word ")
+            }
+            currentWordBuffer.clear()
+
+            // Show alternatives in suggestion bar
+            suggestion1?.text = candidates.getOrNull(1) ?: ""
+            suggestion2?.text = candidates.getOrNull(2) ?: ""
+            suggestion3?.text = candidates.getOrNull(3) ?: ""
+        }
     }
 }
