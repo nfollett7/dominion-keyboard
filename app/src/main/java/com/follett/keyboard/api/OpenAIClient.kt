@@ -49,11 +49,11 @@ class OpenAIClient(private val context: Context) {
         .retryOnConnectionFailure(false)
         .build()
 
-    // Longer timeout client for Whisper (audio upload can be slow)
+    // Longer timeout client for Whisper (supports 3-4 min recordings)
     private val whisperClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .writeTimeout(60, TimeUnit.SECONDS)
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(5, TimeUnit.MINUTES)
+        .writeTimeout(5, TimeUnit.MINUTES)
         .retryOnConnectionFailure(true)
         .build()
 
