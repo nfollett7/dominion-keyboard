@@ -89,9 +89,12 @@ class PredictiveTextEngine(private val context: Context) {
 
     /**
      * Check if a word exists in the dictionary (for autocorrect validation).
+     * Single-character words 'a' and 'i' are always valid.
      */
     fun isValidWord(word: String): Boolean {
         val lower = word.lowercase()
+        // Common single-char words are always valid
+        if (lower == "a" || lower == "i") return true
         return builtInFrequency.containsKey(lower) || userFrequency.containsKey(lower)
     }
 

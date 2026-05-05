@@ -387,19 +387,23 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
             }
         }
 
-        // AUTOCORRECT: If word isn't in dictionary, replace with top suggestion
+        // AUTOCORRECT (GBoard-style rules):
+        // 1. NEVER autocorrect single-character words (a, I, etc.)
+        // 2. NEVER autocorrect if the word IS in the dictionary (it's valid)
+        // 3. Only autocorrect if the correction is very close (same length ±1)
+        // 4. Only autocorrect words 3+ characters long
         var committedWord = word
-        if (isComposing && word.isNotEmpty() && !isPasswordField) {
+        if (isComposing && word.length >= 3 && !isPasswordField) {
             val engine = predictiveEngine
             if (engine != null && !engine.isValidWord(word)) {
                 val suggestions = engine.getSuggestions(word, 1)
                 if (suggestions.isNotEmpty()) {
                     val corrected = suggestions[0]
-                    // Only autocorrect if the suggestion is close to what was typed
-                    if (corrected.length in (word.length - 2)..(word.length + 2)) {
+                    // Only correct if same length ±1 (prevents wild corrections)
+                    if (corrected.length in (word.length - 1)..(word.length + 1)
+                        && corrected != word) {
                         ic.setComposingText(corrected, 1)
                         committedWord = corrected
-                        // Save for undo
                         originalWordBeforeSuggestion = word
                         lastCommittedSuggestion = corrected
                     }
