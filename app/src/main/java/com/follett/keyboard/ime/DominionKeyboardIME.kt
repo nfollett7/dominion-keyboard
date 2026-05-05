@@ -474,7 +474,7 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
         val apiKey = prefsManager.getApiKey()
         Log.d(TAG, "startRecording: apiKey=${if (apiKey.isNullOrBlank()) "EMPTY" else "set (${apiKey.length} chars)"}")
         if (apiKey.isNullOrBlank()) {
-            showStatus("⚠️ Set API key in app settings")
+            showStatus("⚠\uFE0F Set API key in app settings")
             return
         }
         if (openAIClient == null) {
@@ -482,6 +482,14 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
             return
         }
 
+        // Check runtime permission
+        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
+            != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            showStatus("⚠\uFE0F Mic permission needed — open app to grant")
+            return
+        }
+
+        showStatus("🎤 Starting mic...")
         audioFile = File(cacheDir, AUDIO_FILE_NAME)
         try {
             mediaRecorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -499,10 +507,10 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
                 start()
             }
             isRecording = true
-            showStatus("🎤 Listening…")
+            showStatus("🎤 Listening… tap mic to stop")
         } catch (e: Exception) {
             Log.e(TAG, "Mic error", e)
-            showToast("Microphone error: ${e.message}")
+            showStatus("❌ Mic error: ${e.message?.take(40)}")
             mediaRecorder?.release(); mediaRecorder = null
         }
     }

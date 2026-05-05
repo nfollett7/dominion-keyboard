@@ -1,6 +1,9 @@
 package com.follett.keyboard.ui
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.inputmethod.InputMethodManager
@@ -8,6 +11,8 @@ import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.follett.keyboard.R
 import com.follett.keyboard.data.repository.KeyboardRepository
@@ -40,6 +45,7 @@ class MainActivity : AppCompatActivity() {
         setupButtons()
         loadApiKey()
         loadStats()
+        requestMicPermission()
     }
 
     override fun onResume() {
@@ -84,9 +90,12 @@ class MainActivity : AppCompatActivity() {
     private fun loadApiKey() {
         val key = prefsManager.getApiKey()
         if (!key.isNullOrBlank()) {
-            // Show masked key
+            // Show masked key as hint, don't fill the field
+            // This prevents users from accidentally saving the masked version
             val masked = "sk-..." + key.takeLast(4)
-            findViewById<TextInputEditText>(R.id.et_api_key).setText(masked)
+            val editText = findViewById<TextInputEditText>(R.id.et_api_key)
+            editText.hint = "Key saved: $masked"
+            editText.setText("")  // Keep field empty so they don't re-save masked text
         }
     }
 
@@ -110,5 +119,16 @@ class MainActivity : AppCompatActivity() {
         n >= 1_000_000 -> "${n / 1_000_000}M"
         n >= 1_000 -> "${n / 1_000}K"
         else -> n.toString()
+    }
+
+    private fun requestMicPermission() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+            != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.RECORD_AUDIO),
+                100
+            )
+        }
     }
 }
