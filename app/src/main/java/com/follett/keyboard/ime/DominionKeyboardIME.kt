@@ -500,7 +500,7 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
 
         // GPT context-aware autocorrect before sending
         val textBeforeSend = ic.getTextBeforeCursor(500, 0)?.toString() ?: ""
-        if (!isPasswordField && textBeforeSend.length >= 10 && prefsManager.isSmartComposeEnabled()) {
+        if (!isPasswordField && textBeforeSend.length >= 3 && prefsManager.isSmartComposeEnabled()) {
             serviceScope.launch {
                 val corrected = withContext(Dispatchers.IO) {
                     openAIClient?.correctWithContext(textBeforeSend)

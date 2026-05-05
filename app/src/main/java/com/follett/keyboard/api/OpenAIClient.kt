@@ -176,7 +176,7 @@ class OpenAIClient(private val context: Context) {
      */
     suspend fun correctWithContext(sentence: String): String? {
         val apiKey = prefs.getApiKey() ?: return null
-        if (sentence.isBlank() || sentence.length < 10) return null
+        if (sentence.isBlank() || sentence.length < 3) return null
 
         return try {
             val systemPrompt = """You are an autocorrect engine. Fix ONLY typos and misspellings in the user's text.
