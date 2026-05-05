@@ -7,6 +7,9 @@ import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.text.SpannableStringBuilder
+import android.text.Spanned
+import android.text.style.UnderlineSpan
 import android.util.Log
 import android.view.View
 import android.view.ViewGroup
@@ -15,6 +18,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import com.follett.keyboard.R
+import com.follett.keyboard.api.AgentIntent
 import com.follett.keyboard.api.OpenAIClient
 import com.follett.keyboard.data.db.KeyboardDatabase
 import com.follett.keyboard.data.model.KeystrokeLog
@@ -46,6 +50,7 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
         private const val TAG = "DominionKeyboardIME"
         private const val AUDIO_FILE_NAME = "dominion_recording.m4a"
         private const val SUGGESTION_DEBOUNCE_MS = 50L
+        private const val AI_PREDICTION_DEBOUNCE_MS = 500L  // Longer debounce for AI calls
         private const val LOG_FLUSH_INTERVAL_MS = 2000L
     }
 
@@ -72,6 +77,11 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
     private val serviceJob = SupervisorJob()
     private val serviceScope = CoroutineScope(Dispatchers.Main + serviceJob)
     private var suggestionJob: Job? = null
+    private var aiPredictionJob: Job? = null
+
+    // ─── Composing Text State ────────────────────────────────────────────────
+    private var isComposing = false
+    private var sentenceBuffer = StringBuilder()  // Full sentence context for AI
 
     // ─── Dependencies (deferred init) ────────────────────────────────────────
     private var db: KeyboardDatabase? = null
@@ -293,10 +303,19 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
     private fun handleCharacter(char: String) {
         val ic = currentInputConnection ?: return
         val output = if (isShifted || isCapsLock) char.uppercase() else char.lowercase()
-        ic.commitText(output, 1)
-        queueLog(output, "character")
+
+        // Use composing text — word stays underlined until committed
         currentWordBuffer.append(output)
+        ic.setComposingText(currentWordBuffer.toString(), 1)
+        isComposing = true
+
+        queueLog(output, "character")
+
+        // Local suggestions (fast, offline)
         updateSuggestionsDebounced(currentWordBuffer.toString())
+
+        // AI predictions (slower, context-aware) — fires after typing pause
+        triggerAIPrediction()
 
         if (isShifted && !isCapsLock) {
             isShifted = false
@@ -306,12 +325,20 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
 
     private fun handleSpace() {
         val ic = currentInputConnection ?: return
-        ic.commitText(" ", 1)
-        queueLog(" ", "space")
+
+        // Commit the composing word + space
         val word = currentWordBuffer.toString().trim()
+        if (isComposing) {
+            ic.finishComposingText()
+            isComposing = false
+        }
+        ic.commitText(" ", 1)
+
+        queueLog(" ", "space")
         if (word.isNotEmpty()) {
             queueLog(word, "word_complete")
             predictiveEngine?.learnWord(word)
+            sentenceBuffer.append(word).append(" ")
         }
         currentWordBuffer.clear()
         updateSuggestionsDebounced("")
@@ -319,13 +346,18 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
 
     private fun handlePunctuation(char: String) {
         val ic = currentInputConnection ?: return
+        // Finish composing before punctuation
+        if (isComposing) {
+            ic.finishComposingText()
+            isComposing = false
+        }
         ic.commitText(char, 1)
         queueLog(char, "character")
-        // Punctuation ends a word
         val word = currentWordBuffer.toString().trim()
         if (word.isNotEmpty()) {
             queueLog(word, "word_complete")
             predictiveEngine?.learnWord(word)
+            sentenceBuffer.append(word).append(char)
         }
         currentWordBuffer.clear()
         updateSuggestionsDebounced("")
@@ -333,6 +365,7 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
 
     private fun handleEnter() {
         val ic = currentInputConnection ?: return
+        if (isComposing) { ic.finishComposingText(); isComposing = false }
         val imeAction = currentInputEditorInfo?.imeOptions?.and(EditorInfo.IME_MASK_ACTION)
         if (imeAction != null && imeAction != EditorInfo.IME_ACTION_NONE) {
             ic.performEditorAction(imeAction)
@@ -343,22 +376,32 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
         val word = currentWordBuffer.toString().trim()
         if (word.isNotEmpty()) queueLog(word, "word_complete")
         currentWordBuffer.clear()
+        sentenceBuffer.clear()  // New sentence on enter
         updateSuggestionsDebounced("")
     }
 
     private fun handleDelete() {
         val ic = currentInputConnection ?: return
-        val selected = ic.getSelectedText(0)
-        if (!selected.isNullOrEmpty()) {
-            ic.commitText("", 1)
+        if (isComposing && currentWordBuffer.isNotEmpty()) {
+            // Delete within composing region
+            currentWordBuffer.deleteCharAt(currentWordBuffer.length - 1)
+            if (currentWordBuffer.isEmpty()) {
+                ic.finishComposingText()
+                isComposing = false
+            } else {
+                ic.setComposingText(currentWordBuffer.toString(), 1)
+            }
         } else {
-            ic.deleteSurroundingText(1, 0)
+            // Normal delete
+            val selected = ic.getSelectedText(0)
+            if (!selected.isNullOrEmpty()) {
+                ic.commitText("", 1)
+            } else {
+                ic.deleteSurroundingText(1, 0)
+            }
         }
         queueLog("", "delete")
-        if (currentWordBuffer.isNotEmpty()) {
-            currentWordBuffer.deleteCharAt(currentWordBuffer.length - 1)
-            updateSuggestionsDebounced(currentWordBuffer.toString())
-        }
+        updateSuggestionsDebounced(currentWordBuffer.toString())
     }
 
     private fun handleShift() {
@@ -421,14 +464,49 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
     private fun onSuggestionTapped(word: String?) {
         if (word.isNullOrBlank()) return
         val ic = currentInputConnection ?: return
-        if (currentWordBuffer.isNotEmpty()) {
+
+        // If composing, replace the composing text with the suggestion
+        if (isComposing) {
+            ic.setComposingText(word, 1)
+            ic.finishComposingText()
+            isComposing = false
+        } else if (currentWordBuffer.isNotEmpty()) {
             ic.deleteSurroundingText(currentWordBuffer.length, 0)
+            ic.commitText(word, 1)
+        } else {
+            ic.commitText(word, 1)
         }
-        ic.commitText("$word ", 1)
+        ic.commitText(" ", 1)
+
         queueLog(word, "word_complete")
         predictiveEngine?.learnWord(word)
+        sentenceBuffer.append(word).append(" ")
         currentWordBuffer.clear()
         updateSuggestionsDebounced("")
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // AI-POWERED PREDICTIONS (fires after typing pause)
+    // ═════════════════════════════════════════════════════════════════════════
+
+    private fun triggerAIPrediction() {
+        aiPredictionJob?.cancel()
+        aiPredictionJob = serviceScope.launch {
+            delay(AI_PREDICTION_DEBOUNCE_MS)
+            val client = openAIClient ?: return@launch
+            val context = sentenceBuffer.toString() + currentWordBuffer.toString()
+            if (context.length < 3) return@launch  // Need some context
+
+            val predictions = withContext(Dispatchers.IO) {
+                client.getSmartCompletions(context)
+            }
+            if (predictions.isNotEmpty()) {
+                // AI predictions override local suggestions
+                suggestion1?.text = predictions.getOrNull(0) ?: ""
+                suggestion2?.text = predictions.getOrNull(1) ?: ""
+                suggestion3?.text = predictions.getOrNull(2) ?: ""
+            }
+        }
     }
 
     // ═════════════════════════════════════════════════════════════════════════
