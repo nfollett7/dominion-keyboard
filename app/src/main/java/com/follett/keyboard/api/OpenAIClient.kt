@@ -12,8 +12,12 @@ import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlinx.coroutines.suspendCancellableCoroutine
 import java.io.File
+import java.io.IOException
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 /**
  * OpenAIClient — AI services for Dominion Keyboard.
@@ -38,10 +42,14 @@ class OpenAIClient(private val context: Context) {
     private val prefs = PrefsManager(context)
 
     private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(25, TimeUnit.SECONDS)
+        .writeTimeout(25, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(false)
         .build()
+
+    // Track active calls for cancellation
+    private var activeCall: okhttp3.Call? = null
 
     // ═════════════════════════════════════════════════════════════════════════
     // WHISPER — Voice Transcription
@@ -188,13 +196,21 @@ class OpenAIClient(private val context: Context) {
     // SHARED HELPER
     // ═════════════════════════════════════════════════════════════════════════
 
-    private fun chatCompletion(
+    /**
+     * Cancel any in-flight network request. Call from onFinishInputView/onDestroy.
+     */
+    fun cancelActiveRequests() {
+        activeCall?.cancel()
+        activeCall = null
+    }
+
+    private suspend fun chatCompletion(
         apiKey: String,
         systemPrompt: String,
         userMessage: String,
         temperature: Double,
         maxTokens: Int
-    ): String? {
+    ): String? = suspendCancellableCoroutine { continuation ->
         val messages = JSONArray().apply {
             put(JSONObject().apply {
                 put("role", "system")
@@ -220,20 +236,48 @@ class OpenAIClient(private val context: Context) {
             .post(requestBody.toRequestBody("application/json".toMediaType()))
             .build()
 
-        val response = httpClient.newCall(request).execute()
+        val call = httpClient.newCall(request)
+        activeCall = call
 
-        return if (response.isSuccessful) {
-            val body = response.body?.string() ?: return null
-            JSONObject(body)
-                .getJSONArray("choices")
-                .getJSONObject(0)
-                .getJSONObject("message")
-                .getString("content")
-                .trim()
-        } else {
-            Log.e(TAG, "API error ${response.code}: ${response.body?.string()}")
-            null
-        }
+        // Cancel OkHttp call when coroutine is cancelled
+        continuation.invokeOnCancellation { call.cancel() }
+
+        call.enqueue(object : okhttp3.Callback {
+            override fun onFailure(call: okhttp3.Call, e: IOException) {
+                activeCall = null
+                if (continuation.isActive) {
+                    continuation.resume(null)
+                }
+            }
+
+            override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+                activeCall = null
+                if (!continuation.isActive) return
+                try {
+                    if (response.isSuccessful) {
+                        val body = response.body?.string()
+                        if (body != null) {
+                            val result = JSONObject(body)
+                                .getJSONArray("choices")
+                                .getJSONObject(0)
+                                .getJSONObject("message")
+                                .getString("content")
+                                .trim()
+                            continuation.resume(result)
+                        } else {
+                            continuation.resume(null)
+                        }
+                    } else {
+                        Log.e(TAG, "API error ${response.code}")
+                        continuation.resume(null)
+                    }
+                } catch (e: Exception) {
+                    continuation.resume(null)
+                } finally {
+                    response.close()
+                }
+            }
+        })
     }
 }
 

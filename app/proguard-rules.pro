@@ -15,3 +15,12 @@
 
 # Keep Kotlin coroutines
 -keepclassmembernames class kotlinx.** { volatile <fields>; }
+-keepnames class kotlinx.coroutines.internal.MainDispatcherFactory {}
+-keepnames class kotlinx.coroutines.CoroutineExceptionHandler {}
+
+# Keep API models
+-keep class com.follett.keyboard.api.AgentIntent { *; }
+-keep class com.follett.keyboard.api.AgentResponse { *; }
+
+# Keep InputMethodService
+-keep class com.follett.keyboard.ime.DominionKeyboardIME { *; }
