@@ -102,11 +102,9 @@ class KeyboardCanvasView @JvmOverloads constructor(
     private val longPressRunnable = Runnable {
         if (pressedKeyIndex >= 0) {
             val key = keys[pressedKeyIndex]
-            if (key.tag == "SHIFT" || key.tag == "ENTER") {
-                longPressHandled = keyListener?.onKeyLongPressed(key) ?: false
-                if (longPressHandled) {
-                    performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                }
+            longPressHandled = keyListener?.onKeyLongPressed(key) ?: false
+            if (longPressHandled) {
+                performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
             }
         }
     }
@@ -321,8 +319,8 @@ class KeyboardCanvasView @JvmOverloads constructor(
                         handler.postDelayed(repeatRunnable, repeatInitialDelay)
                     }
 
-                    // Schedule long press for SHIFT and ENTER
-                    if (key.tag == "SHIFT" || key.tag == "ENTER") {
+                    // Schedule long press for SHIFT, ENTER, comma, period
+                    if (key.tag in listOf("SHIFT", "ENTER", ",", ".")) {
                         handler.postDelayed(longPressRunnable, 500L)
                     }
                 }

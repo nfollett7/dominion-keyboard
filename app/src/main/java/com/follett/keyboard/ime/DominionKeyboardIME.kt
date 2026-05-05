@@ -46,11 +46,15 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
         private const val LOG_FLUSH_INTERVAL_MS = 3000L
         private const val SENTENCE_BUFFER_MAX = 200
     }
-
-    // ─── Views ───────────────────────────────────────────────────────────────
+    // ─── Views ───────────────────────────────────────────────────────────────────
     private var rootView: LinearLayout? = null
     private var keyboardCanvas: KeyboardCanvasView? = null
+    private var emojiPanel: EmojiPanelView? = null
+    private var clipboardPanel: ClipboardPanel? = null
     private var currentMode: KeyboardMode = KeyboardMode.LETTERS
+    private var currentPanel: PanelMode = PanelMode.KEYBOARD
+
+    enum class PanelMode { KEYBOARD, EMOJI, CLIPBOARD }
 
     private var suggestion1: TextView? = null
     private var suggestion2: TextView? = null
@@ -295,6 +299,8 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
         return when (key.tag) {
             "SHIFT" -> { toggleCapsLock(); true }
             "ENTER" -> { performEnterAction(); true }
+            "," -> { switchToEmoji(); true }
+            "." -> { switchToClipboard(); true }
             else -> false
         }
     }
@@ -521,6 +527,55 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
         currentMode = KeyboardMode.LETTERS
         keyboardCanvas?.setKeyboard(KeyboardCanvasView.createQwertyLayout())
         keyboardCanvas?.setShiftState(isShifted, isCapsLock)
+    }
+
+    private fun switchToEmoji() {
+        if (emojiPanel == null) {
+            emojiPanel = EmojiPanelView(this).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+                emojiListener = object : EmojiPanelView.EmojiListener {
+                    override fun onEmojiSelected(emoji: String) {
+                        currentInputConnection?.commitText(emoji, 1)
+                    }
+                    override fun onBackToKeyboard() {
+                        switchBackToKeyboard()
+                    }
+                }
+            }
+        }
+        currentPanel = PanelMode.EMOJI
+        setInputView(emojiPanel!!)
+    }
+
+    private fun switchToClipboard() {
+        if (clipboardPanel == null) {
+            clipboardPanel = ClipboardPanel(this).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+                clipboardListener = object : ClipboardPanel.ClipboardListener {
+                    override fun onClipboardItemSelected(text: String) {
+                        currentInputConnection?.commitText(text, 1)
+                        switchBackToKeyboard()
+                    }
+                    override fun onBackToKeyboard() {
+                        switchBackToKeyboard()
+                    }
+                }
+            }
+        }
+        clipboardPanel?.refreshClipboard()
+        currentPanel = PanelMode.CLIPBOARD
+        setInputView(clipboardPanel!!)
+    }
+
+    private fun switchBackToKeyboard() {
+        currentPanel = PanelMode.KEYBOARD
+        setInputView(rootView!!)
     }
 
     // ═════════════════════════════════════════════════════════════════════════
