@@ -257,6 +257,7 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
     // ═════════════════════════════════════════════════════════════════════════
 
     override fun onKeyPressed(key: KeyboardCanvasView.Key) {
+        Log.d(TAG, "onKeyPressed: tag='${key.tag}'")
         when (key.tag) {
             "SHIFT" -> handleShift()
             "DELETE" -> handleDelete()
@@ -461,6 +462,7 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
     // ═════════════════════════════════════════════════════════════════════════
 
     private fun handleMicToggle() {
+        Log.d(TAG, "MIC pressed, isRecording=$isRecording")
         if (isRecording) {
             stopRecordingAndTranscribe()
         } else {
@@ -470,12 +472,13 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
 
     private fun startRecording() {
         val apiKey = prefsManager.getApiKey()
+        Log.d(TAG, "startRecording: apiKey=${if (apiKey.isNullOrBlank()) "EMPTY" else "set (${apiKey.length} chars)"}")
         if (apiKey.isNullOrBlank()) {
-            showToast("Set API key in Dominion Keyboard app first")
+            showStatus("⚠️ Set API key in app settings")
             return
         }
         if (openAIClient == null) {
-            showToast("AI initializing, try again in a moment")
+            showStatus("⏳ AI loading, try again...")
             return
         }
 
@@ -544,13 +547,14 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
     // ═════════════════════════════════════════════════════════════════════════
 
     private fun handleTranslate() {
+        Log.d(TAG, "TRANSLATE pressed")
         val apiKey = prefsManager.getApiKey()
         if (apiKey.isNullOrBlank()) {
-            showToast("Set API key in Dominion Keyboard app first")
+            showStatus("⚠️ Set API key in app settings")
             return
         }
         if (openAIClient == null) {
-            showToast("AI initializing, try again in a moment")
+            showStatus("⏳ AI loading, try again...")
             return
         }
 
@@ -581,7 +585,18 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
     // UI HELPERS
     // ═════════════════════════════════════════════════════════════════════════
 
-    private fun showStatus(msg: String) { statusBar?.text = msg; statusBar?.visibility = View.VISIBLE }
+    private fun showStatus(msg: String) {
+        statusBar?.text = msg
+        statusBar?.visibility = View.VISIBLE
+        // Auto-hide after 3 seconds for non-persistent messages
+        serviceScope.launch {
+            delay(3000)
+            if (statusBar?.text == msg) {
+                statusBar?.visibility = View.GONE
+            }
+        }
+    }
+
     private fun hideStatus() { statusBar?.visibility = View.GONE }
     private fun showToast(msg: String) { Toast.makeText(applicationContext, msg, Toast.LENGTH_SHORT).show() }
 }
