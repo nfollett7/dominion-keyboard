@@ -403,6 +403,7 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
         }
         currentWordBuffer.clear()
         updateSuggestionsDebounced("")
+        schedulePauseFix()
     }
 
     private fun handlePunctuation(char: String) {
@@ -429,7 +430,7 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
             isShifted = true
             keyboardCanvas?.setShiftState(true, false)
 
-            // User can tap ✨ Fix button when ready
+            schedulePauseFix()
         }
 
         if (!isPasswordField) updateSuggestionsDebounced("")
@@ -535,11 +536,14 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
         pauseFixJob?.cancel()
         pauseFixJob = serviceScope.launch {
             delay(1500)  // 1.5 seconds of no typing = user paused
+
+            // CRITICAL: Do NOT touch composing state from here.
+            // Only fire if user is NOT mid-word (isComposing == false)
+            if (isComposing) return@launch
+
             val ic = currentInputConnection ?: return@launch
             val client = openAIClient ?: return@launch
             if (prefsManager.shouldShowCostWarning()) return@launch
-
-            if (isComposing) { ic.finishComposingText(); isComposing = false }
 
             val actualText = ic.getTextBeforeCursor(1000, 0)?.toString() ?: return@launch
             if (actualText.length < 10) return@launch
