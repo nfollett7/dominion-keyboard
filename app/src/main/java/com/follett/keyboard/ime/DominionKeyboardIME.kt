@@ -537,14 +537,17 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
         pauseFixJob = serviceScope.launch {
             delay(1500)  // 1.5 seconds of no typing = user paused
 
-            // CRITICAL: Do NOT touch composing state from here.
-            // Only fire if user is NOT mid-word (isComposing == false)
+            // SAFETY CHECKS — do not fire if user is actively typing:
+            // 1. isComposing = user is mid-word (underlined text active)
+            // 2. currentWordBuffer not empty = user started a new word
             if (isComposing) return@launch
+            if (currentWordBuffer.isNotEmpty()) return@launch
 
             val ic = currentInputConnection ?: return@launch
             val client = openAIClient ?: return@launch
             if (prefsManager.shouldShowCostWarning()) return@launch
 
+            // Read the actual text in the field right now
             val actualText = ic.getTextBeforeCursor(1000, 0)?.toString() ?: return@launch
             if (actualText.length < 10) return@launch
 
@@ -555,12 +558,22 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
             prefsManager.addApiCost(170)
 
             if (corrected != null && corrected != actualText && corrected.isNotBlank()) {
+                // Re-check: user might have started typing during the API call
+                if (isComposing || currentWordBuffer.isNotEmpty()) return@launch
+
+                // Preserve trailing space if the original had one
+                val finalText = if (actualText.endsWith(" ") && !corrected.endsWith(" ")) {
+                    "$corrected "
+                } else {
+                    corrected
+                }
+
                 ic.beginBatchEdit()
                 ic.deleteSurroundingText(actualText.length, 0)
-                ic.commitText(corrected, 1)
+                ic.commitText(finalText, 1)
                 ic.endBatchEdit()
                 sentenceBuffer.clear()
-                sentenceBuffer.append(corrected)
+                sentenceBuffer.append(finalText)
             }
         }
     }
