@@ -397,11 +397,11 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
             predictiveEngine?.learnWord(word)
             appendToSentenceBuffer("$word ")
 
-            // GPT autocorrect: after accumulating a few words, correct the sentence
-            // This runs in background and silently fixes typos
-            if (prefsManager.isSmartComposeEnabled() && sentenceBuffer.length >= 15) {
-                triggerGPTAutocorrect()
-            }
+            // GPT autocorrect DISABLED — was corrupting text field
+            // TODO: re-enable once safe text replacement is implemented
+            // if (prefsManager.isSmartComposeEnabled() && sentenceBuffer.length >= 15) {
+            //     triggerGPTAutocorrect()
+            // }
         }
         currentWordBuffer.clear()
         updateSuggestionsDebounced("")
@@ -431,11 +431,12 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
             isShifted = true
             keyboardCanvas?.setShiftState(true, false)
 
-            // Trigger GPT autocorrect on sentence end
-            if (!isPasswordField && prefsManager.isSmartComposeEnabled() && sentenceBuffer.length >= 10) {
-                triggerGPTAutocorrect()
-                sentenceBuffer.clear()
-            }
+            // GPT autocorrect DISABLED — was corrupting text field
+            // TODO: re-enable once safe text replacement is implemented
+            // if (!isPasswordField && prefsManager.isSmartComposeEnabled() && sentenceBuffer.length >= 10) {
+            //     triggerGPTAutocorrect()
+            //     sentenceBuffer.clear()
+            // }
         }
 
         if (!isPasswordField) updateSuggestionsDebounced("")
