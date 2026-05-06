@@ -403,7 +403,6 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
         }
         currentWordBuffer.clear()
         updateSuggestionsDebounced("")
-        schedulePauseFix()
     }
 
     private fun handlePunctuation(char: String) {
@@ -430,8 +429,7 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
             isShifted = true
             keyboardCanvas?.setShiftState(true, false)
 
-            // Pause fix will handle correction after user stops typing
-            schedulePauseFix()
+            // User can tap ✨ Fix button when ready
         }
 
         if (!isPasswordField) updateSuggestionsDebounced("")
