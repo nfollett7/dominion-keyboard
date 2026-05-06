@@ -307,6 +307,7 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
             "LETTERS" -> switchToLetters()
             "EMOJI" -> switchToEmoji()
             "MIC" -> handleMicToggle()
+            "FIX" -> handleFix()
             "TRANSLATE" -> handleTranslate()
             "," -> handlePunctuation(",")
             "." -> handlePunctuation(".")
@@ -402,6 +403,7 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
         }
         currentWordBuffer.clear()
         updateSuggestionsDebounced("")
+        schedulePauseFix()
     }
 
     private fun handlePunctuation(char: String) {
@@ -428,10 +430,8 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
             isShifted = true
             keyboardCanvas?.setShiftState(true, false)
 
-            // GPT autocorrect: fix the whole line on sentence end
-            if (!isPasswordField && prefsManager.isSmartComposeEnabled()) {
-                triggerGPTAutocorrect()
-            }
+            // Pause fix will handle correction after user stops typing
+            schedulePauseFix()
         }
 
         if (!isPasswordField) updateSuggestionsDebounced("")
@@ -469,48 +469,94 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
         if (!isPasswordField) updateSuggestionsDebounced("")
     }
 
-    /**
-     * GPT autocorrect: silently corrects the text the user has typed so far.
-     * Runs in background after sentence-ending punctuation or after enough words.
-     * Replaces the visible text with the corrected version.
-     */
-    private var gptCorrectionJob: Job? = null
+    // ═════════════════════════════════════════════════════════════════════════
+    // GPT FIX — User-triggered and pause-triggered correction
+    // ═════════════════════════════════════════════════════════════════════════
 
-    private fun triggerGPTAutocorrect() {
-        gptCorrectionJob?.cancel()
-        gptCorrectionJob = serviceScope.launch {
-            delay(500)  // Wait for user to finish typing
+    private var fixJob: Job? = null
+    private var pauseFixJob: Job? = null
+
+    /**
+     * User tapped the ✨ Fix button. Correct the entire text field NOW.
+     */
+    private fun handleFix() {
+        fixJob?.cancel()
+        fixJob = serviceScope.launch {
             val ic = currentInputConnection ?: return@launch
             val client = openAIClient ?: return@launch
 
-            // Check cost warning
+            if (isComposing) { ic.finishComposingText(); isComposing = false }
+
+            // Check API key
+            if (!prefsManager.hasApiKey()) {
+                showStatus("⚠️ Set API key in app settings")
+                return@launch
+            }
+
+            // Check cost
             if (prefsManager.shouldShowCostWarning()) {
-                showStatus("⚠️ Daily API cost exceeded $1. Autocorrect paused.")
+                showStatus("⚠️ Daily API cost exceeded $1")
                 prefsManager.markCostWarningShown()
                 return@launch
             }
 
-            // Read the ACTUAL text before cursor from the text field
-            // This is the ground truth — not sentenceBuffer which can desync
-            val actualText = ic.getTextBeforeCursor(500, 0)?.toString() ?: return@launch
+            showStatus("✨ Fixing...", persistent = true)
+
+            // Read ACTUAL text from the text field
+            val actualText = ic.getTextBeforeCursor(1000, 0)?.toString() ?: return@launch
+            if (actualText.isBlank()) { hideStatus(); return@launch }
+
+            val corrected = withContext(Dispatchers.IO) {
+                client.correctWithContext(actualText)
+            }
+
+            prefsManager.addApiCost(170)
+
+            if (corrected != null && corrected != actualText && corrected.isNotBlank()) {
+                ic.beginBatchEdit()
+                ic.deleteSurroundingText(actualText.length, 0)
+                ic.commitText(corrected, 1)
+                ic.endBatchEdit()
+                sentenceBuffer.clear()
+                sentenceBuffer.append(corrected)
+                showStatus("✅ Fixed")
+            } else {
+                showStatus("✅ Looks good")
+            }
+        }
+    }
+
+    /**
+     * Auto-trigger: after 500ms of no typing, correct the line.
+     * Called from handleCharacter/handleSpace on every keystroke.
+     * Safe because it only fires when user has STOPPED typing.
+     */
+    private fun schedulePauseFix() {
+        if (!prefsManager.isSmartComposeEnabled()) return
+        if (isPasswordField) return
+        pauseFixJob?.cancel()
+        pauseFixJob = serviceScope.launch {
+            delay(1500)  // 1.5 seconds of no typing = user paused
+            val ic = currentInputConnection ?: return@launch
+            val client = openAIClient ?: return@launch
+            if (prefsManager.shouldShowCostWarning()) return@launch
+
+            if (isComposing) { ic.finishComposingText(); isComposing = false }
+
+            val actualText = ic.getTextBeforeCursor(1000, 0)?.toString() ?: return@launch
             if (actualText.length < 10) return@launch
 
             val corrected = withContext(Dispatchers.IO) {
                 client.correctWithContext(actualText)
             }
 
-            // Track cost
             prefsManager.addApiCost(170)
 
-            // Only replace if GPT actually changed something
             if (corrected != null && corrected != actualText && corrected.isNotBlank()) {
-                // Use the ACTUAL text length for deletion (not sentenceBuffer)
-                // This guarantees we delete exactly what's there
                 ic.beginBatchEdit()
                 ic.deleteSurroundingText(actualText.length, 0)
                 ic.commitText(corrected, 1)
                 ic.endBatchEdit()
-                // Update sentenceBuffer to match the corrected text
                 sentenceBuffer.clear()
                 sentenceBuffer.append(corrected)
             }
