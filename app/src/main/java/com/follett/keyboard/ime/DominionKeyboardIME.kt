@@ -397,11 +397,8 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
             predictiveEngine?.learnWord(word)
             appendToSentenceBuffer("$word ")
 
-            // GPT autocorrect DISABLED — was corrupting text field
-            // TODO: re-enable once safe text replacement is implemented
-            // if (prefsManager.isSmartComposeEnabled() && sentenceBuffer.length >= 15) {
-            //     triggerGPTAutocorrect()
-            // }
+            // GPT autocorrect only fires on sentence-ending punctuation
+            // Not on spacebar — to avoid correcting mid-sentence while user is still typing
         }
         currentWordBuffer.clear()
         updateSuggestionsDebounced("")
@@ -431,22 +428,34 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
             isShifted = true
             keyboardCanvas?.setShiftState(true, false)
 
-            // GPT autocorrect DISABLED — was corrupting text field
-            // TODO: re-enable once safe text replacement is implemented
-            // if (!isPasswordField && prefsManager.isSmartComposeEnabled() && sentenceBuffer.length >= 10) {
-            //     triggerGPTAutocorrect()
-            //     sentenceBuffer.clear()
-            // }
+            // GPT autocorrect: fix the whole line on sentence end
+            if (!isPasswordField && prefsManager.isSmartComposeEnabled()) {
+                triggerGPTAutocorrect()
+            }
         }
 
         if (!isPasswordField) updateSuggestionsDebounced("")
     }
 
     private fun handleEnter() {
-        // Tap Enter = ALWAYS newline (user preference)
         val ic = currentInputConnection ?: return
         if (isComposing) { ic.finishComposingText(); isComposing = false }
-        ic.commitText("\n", 1)
+
+        // GBoard behavior: respect the app's IME action
+        // Search bar → search, URL bar → go, single-line → done
+        // Multi-line with no action → newline
+        val editorInfo = currentInputEditorInfo
+        val imeAction = editorInfo?.imeOptions?.and(android.view.inputmethod.EditorInfo.IME_MASK_ACTION) ?: 0
+        val isMultiLine = (editorInfo?.inputType ?: 0) and android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE != 0
+
+        if (!isMultiLine && imeAction != android.view.inputmethod.EditorInfo.IME_ACTION_NONE
+            && imeAction != android.view.inputmethod.EditorInfo.IME_ACTION_UNSPECIFIED) {
+            // App wants a specific action (Search, Go, Send, Done, Next)
+            ic.performEditorAction(imeAction)
+        } else {
+            // Multi-line field or no action specified → newline
+            ic.commitText("\n", 1)
+        }
 
         if (!isPasswordField) queueLog("\n", "enter")
         currentWordBuffer.clear()
@@ -470,7 +479,7 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
     private fun triggerGPTAutocorrect() {
         gptCorrectionJob?.cancel()
         gptCorrectionJob = serviceScope.launch {
-            delay(300)  // Small delay to batch rapid typing
+            delay(500)  // Wait for user to finish typing
             val ic = currentInputConnection ?: return@launch
             val client = openAIClient ?: return@launch
 
@@ -481,24 +490,29 @@ class DominionKeyboardIME : InputMethodService(), KeyboardCanvasView.KeyListener
                 return@launch
             }
 
-            // ONLY correct what the user typed (sentenceBuffer), NOT pasted text
-            val typedText = sentenceBuffer.toString().trim()
-            if (typedText.length < 10) return@launch
+            // Read the ACTUAL text before cursor from the text field
+            // This is the ground truth — not sentenceBuffer which can desync
+            val actualText = ic.getTextBeforeCursor(500, 0)?.toString() ?: return@launch
+            if (actualText.length < 10) return@launch
 
             val corrected = withContext(Dispatchers.IO) {
-                client.correctWithContext(typedText)
+                client.correctWithContext(actualText)
             }
 
-            // Track cost (~170 tokens per call: 100 system + 50 input + 50 output)
+            // Track cost
             prefsManager.addApiCost(170)
 
             // Only replace if GPT actually changed something
-            if (corrected != null && corrected != typedText && corrected.isNotBlank()) {
-                // Replace only the portion the user typed (end of text field)
+            if (corrected != null && corrected != actualText && corrected.isNotBlank()) {
+                // Use the ACTUAL text length for deletion (not sentenceBuffer)
+                // This guarantees we delete exactly what's there
                 ic.beginBatchEdit()
-                ic.deleteSurroundingText(typedText.length, 0)
+                ic.deleteSurroundingText(actualText.length, 0)
                 ic.commitText(corrected, 1)
                 ic.endBatchEdit()
+                // Update sentenceBuffer to match the corrected text
+                sentenceBuffer.clear()
+                sentenceBuffer.append(corrected)
             }
         }
     }
